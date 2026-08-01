@@ -13,6 +13,8 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
 
+import 'native_lib.dart';
+
 /// Định dạng nén, khớp với mã số bên Rust.
 enum EncodeFormat {
   /// Opus trong container Ogg. Bitrate tính theo bit/s.
@@ -88,15 +90,17 @@ Future<String> encodeAudioFile({
   }
   // Máy tính: gọi thư viện Rust ở isolate riêng, một part 30 phút mất 5-9 giây
   // nên chạy trên isolate chính là thấy giao diện đứng.
-  final lib = encoderLibraryOverride ?? _libraryName;
+  final overridePath = encoderLibraryOverride;
   final outPath = '$outBase.${format.extension}';
-  await Isolate.run(() => _encodeBlocking(lib, wavPath, outPath, format.code, bitrate));
+  await Isolate.run(
+      () => _encodeBlocking(_libraryName, overridePath, wavPath, outPath, format.code, bitrate));
   return outPath;
 }
 
 /// Phần chạy đồng bộ trong isolate nền.
-void _encodeBlocking(String lib, String wavPath, String outPath, int code, int bitrate) {
-  final library = DynamicLibrary.open(lib);
+void _encodeBlocking(
+    String libraryName, String? overridePath, String wavPath, String outPath, int code, int bitrate) {
+  final library = openNativeLibrary(libraryName, overridePath: overridePath);
   final encode = library.lookupFunction<_EncodeNative, _EncodeDart>('sachnoi_ma_hoa_file');
   final freeString = library.lookupFunction<_FreeNative, _FreeDart>('vieneu_string_free');
 

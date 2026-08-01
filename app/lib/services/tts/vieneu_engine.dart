@@ -59,21 +59,45 @@ class OnDeviceVieNeuEngine implements TtsEngine {
 
   /// Tổng RAM máy, tính bằng GB. null nếu không hỏi được.
   static int? _tongRamGb() {
-    if (!Platform.isWindows) return null;
-    try {
-      final kernel = DynamicLibrary.open('kernel32.dll');
-      final hoi = kernel.lookupFunction<Int32 Function(Pointer<Uint64>),
-          int Function(Pointer<Uint64>)>('GetPhysicallyInstalledSystemMemory');
-      final ra = calloc<Uint64>();
+    if (Platform.isWindows) {
       try {
-        if (hoi(ra) == 0) return null;
-        return (ra.value ~/ (1024 * 1024)).toInt(); // hàm trả về KB
-      } finally {
-        calloc.free(ra);
+        final kernel = DynamicLibrary.open('kernel32.dll');
+        final hoi = kernel.lookupFunction<Int32 Function(Pointer<Uint64>),
+            int Function(Pointer<Uint64>)>('GetPhysicallyInstalledSystemMemory');
+        final ra = calloc<Uint64>();
+        try {
+          if (hoi(ra) == 0) return null;
+          return (ra.value ~/ (1024 * 1024)).toInt(); // hàm trả về KB
+        } finally {
+          calloc.free(ra);
+        }
+      } catch (_) {
+        return null;
       }
-    } catch (_) {
-      return null;
     }
+    if (Platform.isMacOS) {
+      try {
+        final libc = DynamicLibrary.process();
+        final hoi = libc.lookupFunction<
+            Int32 Function(Pointer<Utf8>, Pointer<Uint64>, Pointer<IntPtr>, Pointer<Void>, IntPtr),
+            int Function(
+                Pointer<Utf8>, Pointer<Uint64>, Pointer<IntPtr>, Pointer<Void>, int)>('sysctlbyname');
+        final name = 'hw.memsize'.toNativeUtf8();
+        final ra = calloc<Uint64>();
+        final raLen = calloc<IntPtr>()..value = sizeOf<Uint64>();
+        try {
+          if (hoi(name, ra, raLen, nullptr, 0) != 0) return null;
+          return (ra.value ~/ (1024 * 1024 * 1024)).toInt(); // hàm trả về byte
+        } finally {
+          calloc.free(name);
+          calloc.free(ra);
+          calloc.free(raLen);
+        }
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
   }
 
   /// Mỗi worker chỉ 2 thread: 6×2 nhanh hơn 3×4 vì lấp kín được số nhân mà

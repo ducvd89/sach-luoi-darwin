@@ -276,6 +276,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       hinh: Icons.folder_open_rounded,
                       onNhan: () {
                         if (Platform.isWindows) Process.run('explorer', [state.dataDirectory]);
+                        if (Platform.isMacOS) Process.run('open', [state.dataDirectory]);
                       },
                     ),
                   ],

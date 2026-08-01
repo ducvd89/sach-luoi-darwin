@@ -7,6 +7,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 
+import 'services/native_lib.dart';
 import 'state/app_state.dart';
 import 'ui/app_scope.dart';
 import 'ui/home_shell.dart';
@@ -14,6 +15,7 @@ import 'ui/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  configureOnnxRuntimeForMacOS();
   MediaKit.ensureInitialized();
   runApp(const SachLuoiApp());
 }

@@ -17,6 +17,8 @@ dependencies:
   media_kit: ^1.2.0
   media_kit_libs_windows_audio: ^1.0.9
   media_kit_libs_android_audio: ^1.3.7
+  media_kit_libs_macos_audio: ^1.1.4
+  media_kit_libs_ios_audio: ^1.1.4
 
   # Đọc EPUB (là file zip) và chọn file từ máy
   archive: ^4.0.7

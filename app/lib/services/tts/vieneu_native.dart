@@ -13,6 +13,8 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import '../native_lib.dart';
+
 // -- chữ ký hàm trong thư viện Rust ------------------------------------------
 
 typedef _OpenNative = Pointer<Void> Function(
@@ -110,7 +112,7 @@ class _Native {
   }
 
   static _Native open(VieNeuPaths paths) {
-    final lib = DynamicLibrary.open(paths.libraryPath ?? _defaultLibraryName);
+    final lib = openNativeLibrary(_defaultLibraryName, overridePath: paths.libraryPath);
 
     final modelDir = paths.modelDir.toNativeUtf8();
     final codecDir = paths.codecDir.toNativeUtf8();

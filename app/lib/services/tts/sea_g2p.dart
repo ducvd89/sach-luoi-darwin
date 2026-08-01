@@ -14,6 +14,8 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
+import '../native_lib.dart';
+
 // -- chữ ký hàm trong thư viện Rust ------------------------------------------
 
 typedef _NewNative = Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>);
@@ -76,7 +78,7 @@ class SeaG2p {
 
     final DynamicLibrary lib;
     try {
-      lib = DynamicLibrary.open(libraryPath ?? _libraryName);
+      lib = openNativeLibrary(_libraryName, overridePath: libraryPath);
     } on ArgumentError catch (err) {
       throw SeaG2pException('Không nạp được ${libraryPath ?? _libraryName}: $err');
     }
