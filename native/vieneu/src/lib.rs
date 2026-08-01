@@ -9,8 +9,9 @@
 //! mỗi khung 16 phép nhân ma trận 768×1024 cộng lấy mẫu. Đó là vòng chạy nóng,
 //! đặt ở Rust thì nhanh ngang numpy, còn mảng typed của Dart chậm hơn vài lần.
 
-// Bộ mã hoá khi xuất file — chỉ có trên máy tính, Android dùng MediaCodec.
-#[cfg(not(target_os = "android"))]
+// Bộ mã hoá khi xuất file — chỉ có trên máy tính, Android/iOS dùng bộ mã hoá
+// của hệ điều hành (MediaCodec / không nén, xem audio_encoder.dart).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod ma_hoa;
 
 pub mod engine;

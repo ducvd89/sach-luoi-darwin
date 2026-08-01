@@ -6,7 +6,11 @@ description = "Chạy mô hình VieNeu-TTS trên máy, không cần Python"
 
 [lib]
 name = "sachnoi_vieneu"
-crate-type = ["cdylib", "rlib"]
+# staticlib thêm cho iOS: onnxruntime trên iOS chỉ phát hành dạng tĩnh (xem
+# ghi chú `load-dynamic` bên dưới), và Xcode cũng cần liên kết tĩnh thư viện
+# này vào thẳng file thực thi (`DynamicLibrary.process()` bên Dart) chứ không
+# nạp .dylib rời như macOS.
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 # Chuyển chữ sang âm vị — dùng lại lõi Rust của sea-g2p đã port sang Android.
@@ -14,8 +18,16 @@ sea-g2p-rs = { path = "../sea-g2p", default-features = false, features = ["ffi"]
 
 # ONNX Runtime. `load-dynamic` nghĩa là nạp libonnxruntime lúc chạy chứ không
 # liên kết lúc build: cross-compile sang Android khỏi cần thư viện của Android
-# lúc dựng, và bản .so của Microsoft đi kèm APK là dùng được ngay.
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic", "ndarray"] }
+# lúc dựng, và bản .so của Microsoft đi kèm APK là dùng được ngay. Trên iOS thì
+# ngược lại — Apple không cho nạp động thư viện lạ, và bản onnxruntime chính
+# thức của Microsoft cho iOS cũng chỉ phát hành dạng .xcframework tĩnh — nên
+# `load-dynamic` tắt qua feature `static-ort` (xem [features] bên dưới), và
+# `ort-sys` tự tìm `onnxruntime.xcframework` qua biến môi trường
+# `ORT_IOS_XCFWK_PATH` lúc build (không cần khai gì thêm ở đây).
+# `std` trước đây được bật gián tiếp qua feature `load-dynamic` (nó cần std để
+# gọi libloading); tắt load-dynamic cho iOS thì phải khai std ra tường minh —
+# thiếu nó mất luôn `SessionBuilder::commit_from_file`.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["ndarray", "std"] }
 
 ndarray = "0.17"
 rand = "0.8"
@@ -26,6 +38,10 @@ tokenizers = { version = "0.21", default-features = false, features = ["fancy-re
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[features]
+default = ["load-dynamic"]
+load-dynamic = ["ort/load-dynamic"]
 
 [profile.release]
 opt-level = 3
@@ -38,12 +54,15 @@ panic = "abort"
 # libopus và libmp3lame là mã C. Trên Windows chúng dựng sạch, còn biên dịch
 # chéo sang Android thì audiopus_sys không mang theo mã nguồn libopus (nó đi tìm
 # thư viện hệ thống qua pkg-config, target Android không có gì để tìm), và
-# mp3lame-sys thì đụng stdint.h của NDK.
+# mp3lame-sys thì đụng stdint.h của NDK. iOS cũng loại vì lý do tương tự — build
+# chéo autotools cho kiến trúc/sysroot của iOS không tự chạy được, và
+# `audio_encoder.dart` đã tắt hẳn đường nén trên iOS từ trước (`!Platform.isIOS`),
+# xuất file trên iOS luôn ra WAV.
 #
-# Không phải sửa hai chỗ đó: Android có sẵn MediaCodec trong hệ điều hành, mã
-# hoá được Opus và AAC mà không cần thư viện nào. Nên khai theo target — bản
-# Android không kéo chúng vào, và cũng không phải nhồi ffmpeg vào bộ cài.
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Không phải sửa: Android có sẵn MediaCodec trong hệ điều hành, mã hoá được
+# Opus và AAC mà không cần thư viện nào. Nên khai theo target — bản Android và
+# iOS không kéo chúng vào, và cũng không phải nhồi ffmpeg vào bộ cài.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 mp3lame-encoder = "0.2"
 audiopus = "0.2"
 ogg = "0.9"

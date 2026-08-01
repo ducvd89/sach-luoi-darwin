@@ -1,0 +1,28 @@
+PODS:
+  - Flutter (1.0.0)
+  - media_kit_libs_ios_audio (1.0.4):
+    - Flutter
+  - sherpa_onnx_ios (1.13.4):
+    - Flutter
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - media_kit_libs_ios_audio (from `.symlinks/plugins/media_kit_libs_ios_audio/ios`)
+  - sherpa_onnx_ios (from `.symlinks/plugins/sherpa_onnx_ios/ios`)
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  media_kit_libs_ios_audio:
+    :path: ".symlinks/plugins/media_kit_libs_ios_audio/ios"
+  sherpa_onnx_ios:
+    :path: ".symlinks/plugins/sherpa_onnx_ios/ios"
+
+SPEC CHECKSUMS:
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  media_kit_libs_ios_audio: 905e6323b72e65c63ab9262b2e473f52c024a3a8
+  sherpa_onnx_ios: 32af18abd5c776d5f425d2abe0903471d26db221
+
+PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+
+COCOAPODS: 1.17.0

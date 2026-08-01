@@ -6,8 +6,9 @@ edition = "2021"
 [lib]
 name = "sea_g2p_rs"
 # cdylib để dùng độc lập, rlib để crate suy luận VieNeu gọi trực tiếp — gộp cả
-# hai vào một thư viện native thì Dart chỉ phải nạp một file.
-crate-type = ["cdylib", "rlib"]
+# hai vào một thư viện native thì Dart chỉ phải nạp một file. staticlib thêm
+# cho iOS, liên kết tĩnh vào file thực thi thay vì nạp .dylib rời lúc chạy.
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 # Bản gốc chỉ dựng được cho Python. Tách làm hai chế độ để cùng một mã nguồn vừa
 # chạy trên máy tính qua PyO3, vừa dựng được thư viện .so cổng C cho Android.
