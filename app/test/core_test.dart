@@ -98,6 +98,90 @@ void main() {
         expect(chunk.display.length, lessThanOrEqualTo(chunkMaxChars + 120));
       }
     });
+
+    test('nhiều đoạn văn ngắn liên tiếp được gộp lại thay vì vỡ vụn từng câu', () {
+      // Nhiều truyện convert từ web bọc MỖI CÂU thoại vào một đoạn/thẻ <p>
+      // riêng (xem epub_parser.dart) — ba đoạn "câu" ngắn dưới đây tổng cộng
+      // chưa tới ngưỡng 60% mục tiêu nên phải gộp thành một chunk, không được
+      // để mỗi cái đứng riêng một mình.
+      final result = buildChunks([
+        RawChapter('', 'Ừ.\n\nKhông sao đâu.\n\nCô ấy đi rồi.'),
+      ]);
+      expect(result.chunks.length, 1);
+      expect(result.chunks.single.speech, 'Ừ. Không sao đâu. Cô ấy đi rồi.');
+    });
+
+    test('đoạn văn đã đủ dài thì chốt riêng, không kéo đoạn kế ngắn vào', () {
+      // Đoạn văn A vượt 60% mục tiêu nhưng vẫn dưới targetChars (không cần tự
+      // chia nhỏ) phải chốt thành chunk của riêng nó ngay khi vừa xong — không
+      // đợi gộp thêm đoạn B ngắn phía sau.
+      const sentence = 'Đây là một câu để kiểm tra độ dài của đoạn văn thứ nhất.';
+      var paragraphA = sentence;
+      while (paragraphA.length + 1 + sentence.length <= chunkTargetChars) {
+        paragraphA = '$paragraphA $sentence';
+      }
+      expect(paragraphA.length, greaterThanOrEqualTo((chunkTargetChars * 0.6).ceil()));
+      expect(paragraphA.length, lessThanOrEqualTo(chunkTargetChars));
+      final result = buildChunks([
+        RawChapter('', '$paragraphA\n\nNgắn thôi.'),
+      ]);
+      expect(result.chunks.length, 2);
+      expect(result.chunks[0].display, paragraphA);
+      expect(result.chunks[1].display, 'Ngắn thôi.');
+    });
+
+    test('mẩu cuối của một đoạn văn bị chia nhỏ mà quá ngắn thì gộp vào mẩu liền trước', () {
+      // Một câu DÀI (không dấu câu giữa chừng, nên splitSentences coi là một
+      // câu duy nhất) áp sát targetChars, rồi một câu ĐUÔI rất ngắn. Câu đầu
+      // một mình chưa tràn nên chưa chốt, nhưng cộng thêm câu đuôi thì tràn —
+      // bị tách thành mẩu riêng. Câu đuôi dưới ngưỡng gộp nên phải nhập lại
+      // vào mẩu trước, ra đúng MỘT chunk chứ không phải hai (to + tí hon).
+      const word = 'con mèo ngồi trên nóc tủ nhìn ra ngoài cửa sổ ';
+      var big = '';
+      while (big.length < chunkTargetChars) {
+        big += word;
+      }
+      final bigSentence = '${big.trim()}.';
+      const tail = 'Ngắn thôi.';
+      // Câu đầu một mình đã đủ (hoặc hơn) targetChars, nhưng vì buffer BẮT ĐẦU
+      // rỗng nên nó luôn được nhận không điều kiện — chỉ câu ĐUÔI đến sau mới
+      // kích hoạt việc kiểm tra tràn.
+      expect(bigSentence.length, lessThanOrEqualTo(chunkMaxChars));
+
+      final paragraph = '$bigSentence $tail';
+      final result = buildChunks([RawChapter('', paragraph)]);
+      expect(result.chunks.length, 1);
+      expect(result.chunks.single.display, paragraph);
+    });
+
+    test('đoạn văn gốc không có dấu kết thì được thêm dấu chấm', () {
+      // Sách cào từ web hay thiếu hẳn dấu câu ở cuối đoạn (splitSentences trả
+      // phần đuôi này nguyên trạng, không dấu). Mô hình sinh giọng dựa vào dấu
+      // câu để biết khi nào dừng — thiếu nó dễ thành đọc dở dang.
+      final result = buildChunks([
+        RawChapter('', 'Hôm nay trời đẹp'),
+      ]);
+      expect(result.chunks.single.display, 'Hôm nay trời đẹp.');
+    });
+
+    test('mẩu bị cắt tại dấu phẩy khi câu quá dài thì đổi thành dấu chấm, không để lửng dấu phẩy', () {
+      // Một câu dài phải chia làm nhiều mẩu tại dấu phẩy (_splitLongSentence).
+      // Mẩu ĐẦU khi đứng thành chunk riêng đang kết thúc bằng dấu phẩy dở dang
+      // — phải đổi thành dấu chấm, không được vừa có phẩy vừa thêm chấm.
+      const word = 'con mèo ngồi trên nóc tủ nhìn ra ngoài cửa sổ';
+      var clause = word;
+      while (clause.length < chunkTargetChars) {
+        clause = '$clause, $word';
+      }
+      final sentence = '$clause, và cứ thế tiếp tục mãi cho đến hết câu văn này.';
+      final result = buildChunks([RawChapter('', sentence)]);
+
+      expect(result.chunks, isNotEmpty);
+      for (final chunk in result.chunks) {
+        expect(chunk.display, isNot(endsWith(',')));
+        expect(chunk.display, matches(RegExp(r'[.!?;…]["\)\]»]*$')));
+      }
+    });
   });
 
   group('MP3', () {
@@ -192,6 +276,35 @@ void main() {
     test('không phải WAV thì trả về null', () {
       expect(readWavInfo(Uint8List.fromList([1, 2, 3, 4])), isNull);
       expect(wavDuration(Uint8List(0)), 0);
+    });
+
+    test('ghép khoảng lặng vào đầu: dài ra đúng, phần lặng thật sự im, đuôi giữ nguyên', () {
+      final samples = Float32List(22050); // 1 giây, đủ to để phân biệt với lặng
+      for (var i = 0; i < samples.length; i++) {
+        samples[i] = i.isEven ? 0.5 : -0.5;
+      }
+      final goc = buildWav(samples, 22050);
+
+      final ghep = wavWithLeadingSilence(goc, 200); // 200 ms lặng
+      final info = readWavInfo(ghep);
+      expect(info, isNotNull);
+      expect(wavDuration(ghep), closeTo(1.2, 0.001), reason: '1s gốc + 0,2s lặng');
+
+      final pcm = wavPcm(ghep);
+      // 200 ms đầu ở 22050 Hz, 16-bit mono = 8820 byte, phải toàn số 0.
+      final dauLang = pcm.sublist(0, 8820);
+      expect(dauLang.every((b) => b == 0), isTrue, reason: 'phần ghép vào phải là im lặng thật');
+      // Phần còn lại phải đúng dữ liệu gốc, không bị xê dịch hay cắt mất.
+      expect(pcm.sublist(8820), wavPcm(goc));
+    });
+
+    test('ghép khoảng lặng: không dương hoặc không phải WAV thì trả nguyên input', () {
+      final goc = buildWav(Float32List(100), 22050);
+      final khongLang = wavWithLeadingSilence(goc, 0);
+      expect(identical(khongLang, goc), isTrue);
+
+      final khongPhaiWav = Uint8List.fromList([1, 2, 3, 4]);
+      expect(identical(wavWithLeadingSilence(khongPhaiWav, 200), khongPhaiWav), isTrue);
     });
 
     test('cân bằng âm lượng chỉ hạ đỉnh xuống, không đẩy lên', () {

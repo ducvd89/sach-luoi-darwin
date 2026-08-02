@@ -2,31 +2,50 @@
 ///
 /// Mỗi đoạn là đơn vị của mọi thứ trong ứng dụng: đơn vị phát, đơn vị cache,
 /// đơn vị lưu tiến trình và đơn vị ghép file khi xuất. Đoạn luôn kết thúc ở
-/// ranh giới câu để giọng đọc không bị cụt giữa chừng.
+/// ranh giới câu.
+///
+/// Đoạn văn gốc (ngăn bởi dòng trống) là mốc ưu tiên để chốt một chunk — hết
+/// một đoạn văn mà đã đủ dài thì chốt luôn ở đó thay vì kéo sang đoạn kế, để
+/// chỗ ngắt tác giả đặt ra không bị xoá mất. Nhưng nhiều đoạn văn gốc quá ngắn
+/// (nhiều truyện convert từ web bọc MỖI CÂU vào một đoạn/thẻ `<p>` riêng — xem
+/// `epub_parser.dart`, mỗi câu thoại một `<p>`) thì phải gộp lại với đoạn kế
+/// cho tới khi đủ dài, không thì chunk vỡ vụn thành từng câu một.
 library;
 
 import '../models/book.dart';
 import 'text_normalizer.dart';
 
-/// Độ dài đoạn, tính bằng ký tự.
+/// Độ dài đoạn mục tiêu, tính bằng ký tự — KHÔNG phải mốc tuỳ ý, mà là trần
+/// thật của mô hình sinh âm.
 ///
-/// Từng bị chặn bởi bộ nhớ: bộ giải mã âm tự-chú-ý trên toàn bộ khung của cả
-/// đoạn một lượt, nên RAM tỉ lệ với **bình phương** độ dài — 25 giây ngốn 4,9 GB
-/// và khoảng 50 giây thì ONNX Runtime báo bad allocation. Hai con số dưới đây
-/// (khoảng 14 và 22 giây) sinh ra để né chỗ đó.
+/// Từng thử đổi sang đơn vị từ và nhắm ~200 từ (~1300 ký tự) để chunk bám theo
+/// đoạn văn thật xa hơn — sập ngay: mô hình tự hồi quy VieNeu không "biết dừng
+/// đúng lúc" với đoạn dài cỡ đó, đọc vội và ra tiếng vô nghĩa (đo được: một
+/// đoạn ~200 từ không dừng nổi trong nhiều phút dù đã nới `max_new_frames` lên
+/// 3500).
 ///
-/// Bức tường ấy không còn: bộ giải mã âm giờ chạy cuốn chiếu theo cửa sổ 3 giây
-/// và mang bộ nhớ đệm sang cửa sổ sau, nên bộ nhớ có trần và thời gian tuyến
-/// tính (xem KHUNG_MOI_LUOT trong native/vieneu/src/engine.rs). Đo lại: một đoạn
-/// 121 giây chạy trọn trong 1,16 GB cho cả tiến trình.
+/// Hạ từ 400 xuống đúng 256 — con số ghi trong README về thư viện VieNeu gốc:
+/// nó tự cắt câu thành mảnh ≤256 ký tự trước khi đưa vào mô hình. Đo thực
+/// nghiệm thì 256 và 400 cho tỉ lệ lặp chữ giống nhau (không phải nguyên nhân
+/// chính), nhưng 256 là đúng con số nguyên bản nên không có lý do giữ 400.
 ///
-/// Cái còn giữ hai con số này ở mức thấp giờ là chuyện khác: đoạn là đơn vị
-/// phát, đơn vị cache, đơn vị lưu tiến trình và đơn vị ghép file. Đoạn dài thì
-/// nghe câu đầu tiên lâu hơn, dừng giữa chừng mất nhiều hơn, và bộ nhớ đệm
-/// khoá/giá trị của vòng sinh vẫn lớn dần theo độ dài đoạn — nhân với số worker
-/// chạy song song lúc xuất file thì vẫn phải dè chừng.
-const int chunkTargetChars = 200;
-const int chunkMaxChars = 320;
+/// Đây là MỤC TIÊU chứ không phải trần cứng: hết câu/hết đoạn văn luôn được ưu
+/// tiên hơn bám sát con số này — xem [chunkMaxChars] và nhánh chốt-cuối-đoạn
+/// trong [buildChunks].
+const int chunkTargetChars = 256;
+
+/// Trần cứng cho một mẩu câu bị chia nhỏ.
+///
+/// Chỉ áp dụng khi MỘT câu (không có dấu chấm câu nào giữa chừng) tự nó đã dài
+/// hơn mức này — cắt tại dấu phẩy trước, tại khoảng trắng nếu vẫn không đủ.
+/// Câu bình thường không bao giờ chạm tới đây.
+const int chunkMaxChars = 440;
+
+/// Buffer dưới ngưỡng này (tính bằng ký tự) thì coi là "còn quá ngắn" — chưa
+/// đủ để đứng thành một chunk riêng, phải gộp tiếp với câu/đoạn kế dù có vượt
+/// [chunkTargetChars]. Dùng chung cho cả hai chỗ: cuối một đoạn văn (đừng chốt
+/// non khi mới có vài chục ký tự) và mẩu cuối khi một đoạn quá dài bị chia nhỏ.
+const int chunkMergeUnderChars = 100;
 
 /// Số ký tự đọc được trong một giây ở tốc độ chuẩn — đo thực tế với giọng vi-VN.
 const double charsPerSecond = 14.5;
@@ -103,6 +122,24 @@ List<String> _splitLongSentence(String sentence, int maxChars) {
   return out;
 }
 
+final _terminalPunct = RegExp('[.!?;…]["\')\\]»]*\$');
+final _trailingSoftPunct = RegExp(r'[,:–—-]+\s*$');
+
+/// Đảm bảo văn bản kết thúc bằng dấu hết câu.
+///
+/// Mô hình sinh giọng dựa vào dấu câu để biết khi nào nên dừng hẳn — thiếu nó
+/// là một phần lý do mô hình đôi khi lặp lại vài từ cuối trước khi dừng. Hai
+/// trường hợp hay thiếu: đoạn văn gốc vốn không có dấu kết (lỗi cào từ web
+/// thường gặp), và câu quá dài bị cắt tại dấu phẩy/hai chấm/gạch ngang (xem
+/// [_splitLongSentence]) — mẩu đầu của nó kết thúc bằng dấu phẩy dở dang chứ
+/// không phải dấu hết câu. Gặp trường hợp sau thì bỏ dấu dở dang rồi mới thêm
+/// ".", kẻo ra "...này,." sai chính tả.
+String _ensureTerminal(String text) {
+  final trimmed = text.trimRight();
+  if (trimmed.isEmpty || _terminalPunct.hasMatch(trimmed)) return trimmed;
+  return '${trimmed.replaceFirst(_trailingSoftPunct, '')}.';
+}
+
 final _hasContent = RegExp(r'[A-Za-zÀ-ỹ0-9]');
 
 final _titleKey = RegExp(r'[^A-Za-zÀ-ỹ0-9]');
@@ -143,6 +180,7 @@ ChunkResult buildChunks(
   List<RawChapter> rawChapters, {
   bool expandNumbers = true,
   int targetChars = chunkTargetChars,
+  int mergeUnderChars = chunkMergeUnderChars,
   void Function(int done, int total)? onChapter,
 }) {
   final maxChars = targetChars + 120 > chunkMaxChars ? targetChars + 120 : chunkMaxChars;
@@ -155,7 +193,8 @@ ChunkResult buildChunks(
     final firstChunk = chunks.length;
     var charCount = 0;
 
-    void push(String display, bool heading) {
+    void push(String rawDisplay, bool heading) {
+      final display = _ensureTerminal(rawDisplay);
       final speech = normalizeForSpeech(display, expandNumbers: expandNumbers);
       if (!_hasContent.hasMatch(speech)) return; // không còn gì để đọc
       chunks.add(Chunk(
@@ -197,13 +236,44 @@ ChunkResult buildChunks(
       final clean = paragraph.replaceAll('\n', ' ').trim();
       if (clean.isEmpty) continue;
 
+      // Xử lý đoạn văn này trên một buffer cục bộ, bắt đầu từ đúng chỗ buffer
+      // đang mang theo (để đoạn ngắn nối được với đoạn ngắn liền trước). Mẩu
+      // nào tràn quá targetChars thì chốt luôn vào [pieces]; phần còn dư sau
+      // khi xử lý hết đoạn văn thì giữ lại trong buffer cục bộ.
+      final pieces = <String>[];
+      var local = buffer;
+      buffer = '';
+
       for (final sentence in splitSentences(clean)) {
         for (final piece in _splitLongSentence(sentence, maxChars)) {
-          if (buffer.isNotEmpty && buffer.length + piece.length + 1 > targetChars) flush();
-          buffer = buffer.isEmpty ? piece : '$buffer $piece';
+          // Buffer cục bộ còn quá ngắn thì đừng chốt oan thành một chunk tí
+          // hon chỉ vì piece kế đẩy tổng vượt targetChars — cứ gộp xuống.
+          final ngan = local.length < mergeUnderChars;
+          if (local.isNotEmpty && !ngan && local.length + piece.length + 1 > targetChars) {
+            pieces.add(local);
+            local = '';
+          }
+          local = local.isEmpty ? piece : '$local $piece';
         }
       }
-      // Hết đoạn văn thì chốt luôn nếu đã đủ dài — giữ nhịp nghỉ tự nhiên.
+
+      // Đoạn văn này đã phải tách thành >=1 mẩu hoàn chỉnh (pieces không
+      // rỗng) mà phần dư lại quá ngắn — thay vì để dư ra một mẩu tí hon riêng,
+      // gộp nó vào mẩu hoàn chỉnh liền trước, vẫn trong cùng đoạn văn.
+      if (pieces.isNotEmpty && local.length < mergeUnderChars) {
+        pieces[pieces.length - 1] = '${pieces.last} $local';
+        local = '';
+      }
+
+      for (final piece in pieces) {
+        push(piece, false);
+      }
+
+      buffer = local;
+
+      // Hết đoạn văn gốc thì chốt luôn nếu đã đủ dài — ưu tiên khoảng nghỉ tự
+      // nhiên ở ranh giới đoạn văn thật, thay vì kéo sang đoạn kế chỉ vì chưa
+      // chạm mốc targetChars.
       if (buffer.length >= targetChars * 0.6) flush();
     }
     flush();
