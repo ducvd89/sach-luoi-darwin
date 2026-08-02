@@ -42,8 +42,8 @@ class EncodeException implements Exception {
   String toString() => message;
 }
 
-/// Máy này nén được không. iOS chưa có đường nào nên vẫn ra WAV.
-bool get encoderAvailable => !Platform.isIOS;
+/// Máy này nén được không.
+bool get encoderAvailable => true;
 
 const _kenh = MethodChannel('sachnoi/ma_hoa');
 

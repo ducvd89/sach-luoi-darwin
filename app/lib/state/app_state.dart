@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/book.dart';
 import '../models/export_job.dart';
@@ -408,6 +409,17 @@ class AppState extends ChangeNotifier {
     // thư mục này ra.
     if (Platform.isAndroid) {
       return p.join(Storage.instance.root.path, 'xuat', sub);
+    }
+
+    // iOS: không có khái niệm thư mục Music như desktop, và cũng không tự
+    // chọn thư mục ngoài được (getDirectoryPath trả về đường dẫn có phạm vi
+    // bảo mật riêng mà dart:io không ghi thẳng vào được). Ghi vào Documents
+    // của app — nhờ UIFileSharingEnabled, thư mục này hiện trong Files app ở
+    // mục "Trên iPad/iPhone của tôi → Sách lười", người dùng tự chuyển file đi
+    // đâu tuỳ ý từ đó.
+    if (Platform.isIOS) {
+      final docs = await getApplicationDocumentsDirectory();
+      return p.join(docs.path, sub);
     }
 
     final home = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? Storage.instance.root.path;

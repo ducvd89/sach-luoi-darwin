@@ -498,7 +498,7 @@ fn remove_voice_from_file(path: &Path, name: &str) -> Result<(), String> {
 // -- nén file khi xuất --------------------------------------------------------
 
 /// Đặt chuỗi lỗi vào tham số ra. Bên gọi giải phóng bằng `vieneu_string_free`.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(target_os = "android"))]
 fn dat_loi(loi_ra: *mut *mut c_char, message: String) -> c_int {
     if !loi_ra.is_null() {
         if let Ok(s) = CString::new(message) {
@@ -518,7 +518,7 @@ fn dat_loi(loi_ra: *mut *mut c_char, message: String) -> c_int {
 ///
 /// Ghi vào file tạm rồi đổi tên, nên nếu máy tắt giữa lúc nén thì không để lại
 /// một file .opus dở dang mà phần xuất file tưởng là đã xong.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(target_os = "android"))]
 #[unsafe(no_mangle)]
 pub extern "C" fn sachnoi_ma_hoa_file(
     wav_path: *const c_char,
@@ -569,7 +569,7 @@ pub extern "C" fn sachnoi_ma_hoa_file(
     0
 }
 
-#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+#[cfg(all(test, not(target_os = "android")))]
 mod kiem_thu_ma_hoa {
     use super::*;
 

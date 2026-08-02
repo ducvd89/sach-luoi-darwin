@@ -440,6 +440,7 @@ class _FolderRowState extends State<_FolderRow> {
   @override
   Widget build(BuildContext context) {
     if (Platform.isAndroid) return _hangAndroid(context);
+    if (Platform.isIOS) return _hangIOS(context);
 
     final path = widget.path ?? _resolved ?? '…';
     return Row(
@@ -508,6 +509,40 @@ class _FolderRowState extends State<_FolderRow> {
               child: const Text('Dùng lại thư viện nhạc của máy', style: TextStyle(fontSize: 12.5)),
             ),
           ),
+      ],
+    );
+  }
+
+  /// iOS: không tự chọn được thư mục ngoài — `getDirectoryPath` trả về đường
+  /// dẫn có phạm vi bảo mật riêng mà dart:io không ghi thẳng vào được, giống
+  /// hệt vướng mắc trên Android (xem ghi chú ở `_chonThuMucAndroid`). Ghi
+  /// thẳng vào Documents của app, người dùng lấy file qua ứng dụng Files.
+  Widget _hangIOS(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.folder_outlined, size: 19, color: hint),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                widget.path ?? _resolved ?? '…',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 28, top: 2),
+          child: Text(
+            'Lấy file trong ứng dụng Files → Trên iPhone/iPad → Sách lười',
+            style: TextStyle(fontSize: 12, color: hint),
+          ),
+        ),
       ],
     );
   }

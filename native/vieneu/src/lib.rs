@@ -11,7 +11,7 @@
 
 // Bộ mã hoá khi xuất file — chỉ có trên máy tính, Android/iOS dùng bộ mã hoá
 // của hệ điều hành (MediaCodec / không nén, xem audio_encoder.dart).
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(target_os = "android"))]
 pub mod ma_hoa;
 
 pub mod engine;

@@ -71,11 +71,11 @@
 		97C146FD1CF9000F007C117D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		9C2E64780F31476C8160CF25 /* onnxruntime.xcframework */ = {isa = PBXFileReference; includeInIndex = 1; name = onnxruntime.xcframework; path = ../../native/vendor/onnxruntime/ios/onnxruntime.xcframework; sourceTree = "<group>"; };
+		9C2E64780F31476C8160CF25 /* onnxruntime.xcframework */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = wrapper.xcframework; name = onnxruntime.xcframework; path = ../../native/vendor/onnxruntime/ios/onnxruntime.xcframework; sourceTree = "<group>"; };
 		A05407CD80B881660B443478 /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		A457CFFA661B694BCE5C1613 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		B716E03D901E97ABE11D1CEC /* Pods-RunnerTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.release.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig"; sourceTree = "<group>"; };
-		F28AFD096341A23A3B8005A0 /* sachnoi_vieneu.xcframework */ = {isa = PBXFileReference; includeInIndex = 1; name = sachnoi_vieneu.xcframework; path = ../../native/vendor/xcframeworks/sachnoi_vieneu.xcframework; sourceTree = "<group>"; };
+		F28AFD096341A23A3B8005A0 /* sachnoi_vieneu.xcframework */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = wrapper.xcframework; name = sachnoi_vieneu.xcframework; path = ../../native/vendor/xcframeworks/sachnoi_vieneu.xcframework; sourceTree = "<group>"; };
 		FB3D934C0C77CC4310F8B5BD /* Pods-RunnerTests.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.profile.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.profile.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -192,7 +192,6 @@
 				B716E03D901E97ABE11D1CEC /* Pods-RunnerTests.release.xcconfig */,
 				FB3D934C0C77CC4310F8B5BD /* Pods-RunnerTests.profile.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -509,7 +508,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = ER3VGDY489;
 				ENABLE_BITCODE = NO;
+				EXPORTED_SYMBOLS_FILE = "$(SRCROOT)/Runner/exported_symbols.txt";
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -696,7 +697,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = ER3VGDY489;
 				ENABLE_BITCODE = NO;
+				EXPORTED_SYMBOLS_FILE = "$(SRCROOT)/Runner/exported_symbols.txt";
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -723,7 +726,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = ER3VGDY489;
 				ENABLE_BITCODE = NO;
+				EXPORTED_SYMBOLS_FILE = "$(SRCROOT)/Runner/exported_symbols.txt";
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
