@@ -49,20 +49,24 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
-# Bộ mã hoá âm thanh cho việc xuất file — CHỈ cho máy tính.
+# Bộ mã hoá âm thanh cho việc xuất file — mọi nền tảng trừ Android.
 #
-# libopus và libmp3lame là mã C. Trên Windows chúng dựng sạch, còn biên dịch
-# chéo sang Android thì audiopus_sys không mang theo mã nguồn libopus (nó đi tìm
-# thư viện hệ thống qua pkg-config, target Android không có gì để tìm), và
-# mp3lame-sys thì đụng stdint.h của NDK. iOS cũng loại vì lý do tương tự — build
-# chéo autotools cho kiến trúc/sysroot của iOS không tự chạy được, và
-# `audio_encoder.dart` đã tắt hẳn đường nén trên iOS từ trước (`!Platform.isIOS`),
-# xuất file trên iOS luôn ra WAV.
+# libopus và libmp3lame là mã C. Trên Windows và macOS chúng dựng sạch. Biên
+# dịch chéo sang Android thì audiopus_sys không mang theo mã nguồn libopus (nó
+# đi tìm thư viện hệ thống qua pkg-config, target Android không có gì để tìm),
+# và mp3lame-sys thì đụng stdint.h của NDK — nên Android loại hẳn hai thứ này.
 #
 # Không phải sửa: Android có sẵn MediaCodec trong hệ điều hành, mã hoá được
-# Opus và AAC mà không cần thư viện nào. Nên khai theo target — bản Android và
-# iOS không kéo chúng vào, và cũng không phải nhồi ffmpeg vào bộ cài.
+# Opus và AAC mà không cần thư viện nào. Nên khai theo target — bản Android
+# không kéo chúng vào, và cũng không phải nhồi ffmpeg vào bộ cài.
+#
+# iOS thì dựng được cả hai, chỉ tốn công chỉ đường: mp3lame-sys tự lo qua
+# --host, còn audiopus_sys phải trỏ OPUS_LIB_DIR vào bản libopus dựng tay cho
+# đúng kiến trúc/sysroot của iOS — xem `dung-native-apple.sh` ở gốc repo.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 mp3lame-encoder = "0.2"
 audiopus = "0.2"
 ogg = "0.9"
+# Thuần Rust, không FFI/thư viện C — không có gì để cross-compile, khác hẳn
+# hai bộ mã hoá trên. Cho AAC vào Windows/macOS/Linux/iOS dễ như MP3.
+rusty_aac = "0.1"

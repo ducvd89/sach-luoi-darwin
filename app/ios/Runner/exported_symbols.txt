@@ -1,3 +1,13 @@
+# Danh sách symbol được giữ lại khi link (EXPORTED_SYMBOLS_FILE). Bản Release
+# strip sạch những gì không được tham chiếu tường minh, kể cả khi đã -all_load —
+# mà Dart tra các hàm này bằng dlsym qua DynamicLibrary.process(), không có chỗ
+# nào gọi thẳng để mà giữ.
 _vieneu_*
 _sea_g2p_*
 _sachnoi_*
+
+# Bản Debug/Profile không nạp thẳng file thực thi: Xcode dựng Runner.debug.dylib
+# rồi một stub nhỏ dlsym("main") trong đó. Danh sách này áp cho cả lần link ấy,
+# nên thiếu _main là stub không tìm ra điểm vào và app tắt ngay lúc mở
+# ("abort_could_not_find_entry_point___debug_dylib"), chỉ Release chạy được.
+_main

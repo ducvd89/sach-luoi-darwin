@@ -4,6 +4,7 @@
 /// `flutter test` vẫn xanh trên máy chưa dựng Rust.
 library;
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -13,7 +14,16 @@ import 'package:path/path.dart' as p;
 import 'package:sach_noi/core/wav.dart';
 import 'package:sach_noi/services/audio_encoder.dart';
 
-const _lib = r'C:\Software\Ebookreader\native\vieneu\target\release\sachnoi_vieneu.dll';
+/// Các chỗ có thể có bản dựng release của thư viện native. Đường Windows là
+/// tuyệt đối vì bản gốc dựng ở đó; trên macOS thì dò theo repo, `flutter test`
+/// chạy với thư mục hiện hành là `app/`. Xem `dung-native-apple.sh` để dựng.
+const _cacDuongLib = [
+  r'C:\Software\Ebookreader\native\vieneu\target\release\sachnoi_vieneu.dll',
+  '../native/vieneu/target/aarch64-apple-darwin/release/libsachnoi_vieneu.dylib',
+  '../native/vieneu/target/release/libsachnoi_vieneu.dylib',
+];
+
+final String? _lib = _cacDuongLib.where((d) => File(d).existsSync()).firstOrNull;
 
 /// Một giây sóng sin — đủ để bộ mã hoá có việc thật.
 Uint8List _wavMotGiay() {
@@ -25,7 +35,7 @@ Uint8List _wavMotGiay() {
 }
 
 /// Có thư viện native đã dựng để mà gọi không.
-bool _coThuVien() => File(_lib).existsSync() && encoderAvailable;
+bool _coThuVien() => _lib != null && encoderAvailable;
 
 void main() {
   late Directory dir;
@@ -40,7 +50,7 @@ void main() {
     if (dir.existsSync()) dir.deleteSync(recursive: true);
   });
 
-  test('nén được sang Opus và MP3, file nhỏ hơn WAV rất nhiều', () async {
+  test('nén được sang Opus, MP3 và AAC, file nhỏ hơn WAV rất nhiều', () async {
     if (!_coThuVien()) {
       markTestSkipped('Chưa dựng thư viện native — bỏ qua');
       return;
@@ -52,6 +62,7 @@ void main() {
       (EncodeFormat.opus, 32000, 'ra32.opus'),
       (EncodeFormat.opus, 64000, 'ra64.opus'),
       (EncodeFormat.mp3, 128, 'ra.mp3'),
+      (EncodeFormat.aac, 64000, 'ra.aac'),
     ]) {
       final ra = File(p.join(dir.path, ten));
       await encodeAudioFile(
@@ -63,11 +74,37 @@ void main() {
       if (format == EncodeFormat.opus) {
         expect(String.fromCharCodes(bytes.take(4)), 'OggS', reason: 'Opus nằm trong Ogg');
       } else {
-        expect(bytes.first, 0xFF, reason: 'khung MP3 mở đầu bằng 0xFF');
+        // Khung MP3 và khung ADTS (AAC) đều mở đầu bằng 0xFF.
+        expect(bytes.first, 0xFF, reason: '$ten mở đầu bằng 0xFF');
       }
       // Không được để lại file tạm.
       expect(File('${ra.path}.tmp').existsSync(), isFalse);
     }
+  }, timeout: const Timeout(Duration(minutes: 3)));
+
+  test('onProgress níu theo vật không gửi qua isolate được thì vẫn nén xong', () async {
+    if (!_coThuVien()) {
+      markTestSkipped('Chưa dựng thư viện native — bỏ qua');
+      return;
+    }
+    // Bên gọi thật (ExportService) truyền onProgress ôm theo cả chuỗi
+    // ExportService -> TtsManager -> Future trong engine TTS hệ thống. Future
+    // không gửi qua isolate được, mà closure chạy trên isolate lại dùng chung
+    // context với onProgress nếu hai thứ nằm cùng một hàm — lúc ấy nén hỏng hết
+    // và lặng lẽ rơi về giữ nguyên WAV. Dựng lại đúng cảnh đó ở đây.
+    final khongGuiDuoc = Completer<void>().future;
+    final wav = File(p.join(dir.path, 'vao.wav'))..writeAsBytesSync(_wavMotGiay());
+    final ra = File(p.join(dir.path, 'ra.opus'));
+
+    await encodeAudioFile(
+      wavPath: wav.path,
+      outBase: p.withoutExtension(ra.path),
+      format: EncodeFormat.opus,
+      bitrate: 32000,
+      onProgress: (_) => khongGuiDuoc.ignore(),
+    );
+
+    expect(ra.existsSync(), isTrue, reason: 'phải nén ra file thật, không ném lỗi');
   }, timeout: const Timeout(Duration(minutes: 3)));
 
   test('bitrate cao hơn thì file to hơn', () async {
@@ -116,7 +153,9 @@ void main() {
     // Đổi mấy con số này là đổi luôn giao kèo với thư viện native.
     expect(EncodeFormat.opus.code, 0);
     expect(EncodeFormat.mp3.code, 1);
+    expect(EncodeFormat.aac.code, 2);
     expect(EncodeFormat.opus.extension, 'opus');
     expect(EncodeFormat.mp3.extension, 'mp3');
+    expect(EncodeFormat.aac.extension, 'aac');
   });
 }

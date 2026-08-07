@@ -19,6 +19,7 @@ import '../storage.dart';
 import 'model_store.dart';
 import 'tts_engine.dart';
 import 'ondevice_engine.dart';
+import 'system_tts_engine.dart';
 import 'vieneu_engine.dart';
 
 class CachedAudio {
@@ -32,16 +33,26 @@ class CachedAudio {
 }
 
 class TtsManager {
-  TtsManager({ModelStore? store}) : modelStore = store ?? ModelStore() {
+  /// [themEngine] chỉ dùng trong kiểm thử: cắm thêm engine giả để soi những
+  /// phần gọi engine mà không cần mô hình thật trên máy.
+  TtsManager({ModelStore? store, List<TtsEngine> themEngine = const []})
+      : modelStore = store ?? ModelStore() {
     onDevice = OnDeviceVieNeuEngine(modelStore);
-    // Hai engine, cùng chạy thẳng trên máy: VieNeu cho chất lượng, Piper cho
-    // nhẹ. Không còn đường nào phải nhờ máy khác đọc hộ.
-    _engines = {onDevice.id: onDevice, piper.id: piper};
+    // Ba engine, cùng chạy thẳng trên máy: VieNeu cho chất lượng, Piper cho
+    // nhẹ, TTS hệ thống cho máy đã có sẵn giọng mà không muốn tải gì thêm.
+    // Không còn đường nào phải nhờ máy khác đọc hộ.
+    _engines = {
+      onDevice.id: onDevice,
+      piper.id: piper,
+      systemTts.id: systemTts,
+      for (final e in themEngine) e.id: e,
+    };
   }
 
   final ModelStore modelStore;
   late final OnDeviceVieNeuEngine onDevice;
   final OnDeviceTtsEngine piper = OnDeviceTtsEngine();
+  final SystemTtsEngine systemTts = SystemTtsEngine();
   late final Map<String, TtsEngine> _engines;
 
   /// Các yêu cầu đang chạy, để hai nơi cùng xin một đoạn thì chỉ tổng hợp một lần.
@@ -88,9 +99,15 @@ class TtsManager {
     return (dir, key.substring(2));
   }
 
-  File _cacheFile(String engineId, String voiceId, double speed, String text, String dauNguCanh) {
+  /// [lanThu] > 0 là bản đọc lại của cùng đoạn ấy (xem `export_service.dart`) —
+  /// mỗi lần một file riêng, để lần chạy tiếp sau khi tạm dừng vẫn lấy lại đúng
+  /// bản đọc đã chọn chứ không phải đọc lại từ đầu. Lần đầu giữ nguyên tên cũ
+  /// nên bộ nhớ đệm của các bản trước vẫn dùng được.
+  File _cacheFile(String engineId, String voiceId, double speed, String text, String dauNguCanh,
+      int lanThu) {
     final (dir, goc) = _viTri(engineId, voiceId, speed, text);
-    return File(p.join(dir.path, '$goc$dauNguCanh.${engine(engineId).audioFormat}'));
+    final lan = lanThu > 0 ? '-l$lanThu' : '';
+    return File(p.join(dir.path, '$goc$dauNguCanh$lan.${engine(engineId).audioFormat}'));
   }
 
   /// Thời lượng của một file đã nằm trong bộ nhớ đệm.
@@ -104,10 +121,11 @@ class TtsManager {
     required double speed,
     required String text,
     List<int>? nguCanh,
+    int lanThu = 0,
   }) async {
     final co = nguCanh != null && nguCanh.isNotEmpty;
     final dau = co ? sha1.convert(_bytesOf(nguCanh)).toString().substring(0, 12) : '';
-    final file = _cacheFile(engineId, voiceId, speed, text, dau);
+    final file = _cacheFile(engineId, voiceId, speed, text, dau, lanThu);
 
     if (await file.exists()) {
       final bytes = await file.readAsBytes();
@@ -126,7 +144,8 @@ class TtsManager {
     // Chú ý thân hàm phải là câu lệnh, không phải biểu thức: Map.remove trả về
     // chính future đang lưu, mà whenComplete lại chờ giá trị trả về nếu đó là
     // Future — thành ra future tự chờ chính nó và treo mãi mãi.
-    final future = _synthesizeToFile(engineId, voiceId, speed, text, file, nguCanh).whenComplete(() {
+    final future =
+        _synthesizeToFile(engineId, voiceId, speed, text, file, nguCanh, lanThu).whenComplete(() {
       _inflight.remove(key);
     });
     _inflight[key] = future;
@@ -140,12 +159,14 @@ class TtsManager {
     String text,
     File file,
     List<int>? nguCanh,
+    int lanThu,
   ) async {
     final result = await engine(engineId).synthesize(
       text: text,
       voiceId: voiceId,
       speed: speed,
       nguCanh: nguCanh,
+      lanThu: lanThu,
     );
     await file.parent.create(recursive: true);
     final tmp = File('${file.path}.tmp');

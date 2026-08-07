@@ -10,7 +10,7 @@ Mô hình giọng nói chạy trong chính tiến trình của ứng dụng qua 
 
 ## Cài đặt
 
-**Windows** — chạy bộ cài `SachLuoi-Setup-1.3.0.exe` (~33 MB). Không cần quyền quản trị: nó cài vào
+**Windows** — chạy bộ cài `SachLuoi-Setup-1.3.2.exe` (~33 MB). Không cần quyền quản trị: nó cài vào
 `%LOCALAPPDATA%\Programs\SachLuoi`, tạo lối tắt Start Menu và trình gỡ cài. Lúc gỡ có **hỏi riêng**
 trước khi xoá thư viện sách — mặc định giữ lại.
 
@@ -143,7 +143,7 @@ nhảy tới đó. Tua ±15 giây, kéo thanh tiến trình trên toàn bộ sá
 Trên điện thoại có thanh chương mở lên từ dưới để nhảy tới chương bất kỳ.
 Phím tắt trên máy tính: `Space` phát/dừng · `←` `→` tua · `↑` `↓` chuyển đoạn.
 
-Đổi tốc độ (0.75×–2.0×) có hiệu lực ngay vì áp vào lúc phát, không phải tạo lại âm thanh.
+Đổi tốc độ (0.4×–2.0×) có hiệu lực ngay vì áp vào lúc phát, không phải tạo lại âm thanh.
 
 **Điều khiển ngoài ứng dụng (Android)** — sách đang nghe hiện ở phần "Đang phát" của hệ điều hành:
 điều khiển được từ màn hình khoá, từ khu thông báo và bằng nút trên tai nghe. Thanh tua trong thông
@@ -157,6 +157,17 @@ bản một luồng riêng. Đo trên máy 12 nhân — 2,87× thời gian thự
 chạy sáu luồng, tức sách 10 giờ mất hơn một tiếng thay vì ba tiếng rưỡi. Số luồng lấy theo số nhân
 của máy, tối đa sáu. Chỉ bật lúc xuất file: nghe trực tiếp một luồng đã nhanh hơn tốc độ nghe, mở
 thêm chỉ tốn RAM (mỗi bản mô hình khoảng 250 MB) và làm máy nóng. Điện thoại luôn giữ một luồng.
+
+**Soi lại từng đoạn ngay khi xuất** — tiếng Việt gần như mỗi từ là một âm riêng, nên đếm số âm nghe
+được trong đoạn vừa tạo rồi so với số từ trong văn bản là biết mô hình có đọc hỏng hay không: lặp
+lại mấy chữ cuối, nuốt mất nửa câu, hay lảm nhảm không dừng. Lệch quá 15% (đoạn dưới bảy từ thì
+lệch quá một âm) là đọc lại đoạn ấy bằng một hạt giống khác, tối đa năm lần; hết lượt vẫn lệch thì
+lấy bản gần đúng nhất chứ không bỏ trống. Phép đếm dựa vào đường cường độ trong dải nguyên âm, đo
+trên 120 câu đọc thật bằng ba giọng thì trúng 113 câu — xem `app/lib/core/kiem_am.dart`.
+
+Màn hình xuất file có khung nhật ký chạy theo thời gian thực: đoạn nào lệch thì hiện ngay số âm
+nghe được so với số từ và đang đọc lại lần thứ mấy, đọc lại xong khớp thì chuyển xanh, hết lượt vẫn
+lệch thì chuyển đỏ để biết chỗ nào nên nghe lại bằng tai.
 
 Không dùng GPU. Lý do nằm ở chỗ mô hình được xuất ra ONNX với chiều batch **cố định bằng 1** — GPU
 chỉ thắng khi gộp được nhiều đoạn vào một lượt, mà đồ thị hiện tại không cho gộp; chạy từng đoạn
@@ -191,12 +202,13 @@ app/                     Ứng dụng Flutter (Windows + Android)
       txt_parser.dart      TXT -> danh sách chương, đoán bảng mã
       mp3.dart             đo thời lượng, thẻ ID3, khung im lặng — không cần ffmpeg
       wav.dart             dựng/ghép WAV cho engine chạy trong ứng dụng
+      kiem_am.dart         đếm âm trong sóng, soi lại đoạn vừa đọc có khớp văn bản không
     models/              Book, Chunk, Progress, ExportJob, AppSettings, WorkProgress
     services/
       library_service.dart   thư viện sách và tiến trình nghe
       import_worker.dart     phân tích sách ở isolate nền + báo tiến trình
       player_controller.dart điều khiển phát, tổng hợp trước, lưu vị trí
-      export_service.dart    xuất file, tạm dừng và chạy tiếp
+      export_service.dart    xuất file, tạm dừng và chạy tiếp, đọc lại đoạn đọc hỏng
       media_session.dart     đưa sách lên phần "Đang phát" của hệ điều hành
       tts/
         tts_engine.dart      giao diện chung cho các engine
