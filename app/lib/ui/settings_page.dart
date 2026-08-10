@@ -13,7 +13,9 @@ import '../services/storage.dart';
 import '../services/tts/model_store.dart';
 import '../services/tts/voice_pack.dart';
 import 'app_scope.dart';
+import 'cuon_tay_cam.dart';
 import 'nut_sac.dart';
+import 'thanh_keo_tay_cam.dart';
 import 'theme.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -24,7 +26,14 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  final _cuon = ScrollController();
   ({int bytes, int files})? _cache;
+
+  @override
+  void dispose() {
+    _cuon.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -67,7 +76,10 @@ class _SettingsPageState extends State<SettingsPage> {
     final settings = state.settings;
     final hint = Theme.of(context).hintColor;
 
-    return ListView(
+    return CuonTayCam(
+      controller: _cuon,
+      child: ListView(
+      controller: _cuon,
       padding: const EdgeInsets.fromLTRB(22, 20, 22, 26),
       children: [
         Text('Cài đặt', style: Theme.of(context).textTheme.headlineSmall),
@@ -82,17 +94,27 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 const Text('Giọng đọc', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 14),
-                for (final engine in state.tts.engines)
-                  RadioListTile<String>(
-                    value: engine.id,
-                    groupValue: settings.engineId,
-                    onChanged: (value) {
-                      if (value != null) AppScope.read(context).setEngine(value);
-                    },
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(engine.displayName, style: const TextStyle(fontSize: 14)),
-                    subtitle: Text(engine.description, style: TextStyle(fontSize: 12.5, color: hint)),
+                RadioGroup<String>(
+                  groupValue: settings.engineId,
+                  onChanged: (value) {
+                    if (value != null) AppScope.read(context).setEngine(value);
+                  },
+                  // Giữ nguyên cách canh của Column bọc ngoài: RadioGroup chỉ
+                  // thay chỗ giữ giá trị đang chọn, không được đổi bố cục.
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final engine in state.tts.engines)
+                        RadioListTile<String>(
+                          value: engine.id,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(engine.displayName, style: const TextStyle(fontSize: 14)),
+                          subtitle:
+                              Text(engine.description, style: TextStyle(fontSize: 12.5, color: hint)),
+                        ),
+                    ],
                   ),
+                ),
                 const Divider(height: 26),
                 if (state.voices.isEmpty)
                   Text(
@@ -195,7 +217,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Row(
                   children: [
                     Expanded(
-                      child: Slider(
+                      child: ThanhKeoTayCam(
                         value: settings.chunkPauseMs.toDouble().clamp(0, 2000),
                         min: 0,
                         max: 2000,
@@ -226,9 +248,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
         ),
-        const SizedBox(height: 14),
-
-        // -- Dịch vụ giọng đọc ------------------------------------------------
         const SizedBox(height: 14),
 
         // -- Dữ liệu ----------------------------------------------------------
@@ -296,6 +315,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
       ],
+      ),
     );
   }
 }

@@ -1,4 +1,4 @@
-/// Xuất sách nói ra file MP3.
+/// Xuất sách nói ra file âm thanh.
 ///
 /// Điểm quan trọng: công việc có thể dừng và chạy tiếp bất cứ lúc nào, kể cả
 /// sau khi tắt ứng dụng. Trạng thái nằm trong job.json, phần âm thanh đang ghi
@@ -14,7 +14,6 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 
 import '../core/kiem_am.dart';
-import '../core/mp3.dart';
 import '../core/wav.dart';
 import '../models/book.dart';
 import '../models/export_job.dart';
@@ -24,7 +23,6 @@ import 'storage.dart';
 import 'thu_muc_xuat.dart';
 import 'tts/tts_manager.dart';
 
-/// Số đoạn tổng hợp trước để không phải chờ mạng/GPU giữa chừng.
 /// Số đoạn tổng hợp trước trong lúc đang ghi đoạn hiện tại.
 ///
 /// Phải nhiều hơn số worker chạy song song, không thì có worker ngồi không.
@@ -102,11 +100,6 @@ class ExportService {
     return jobs;
   }
 
-  Future<ExportJob?> getJob(String id) async {
-    final json = await Storage.readJsonMap(_jobFile(id));
-    return json == null ? null : ExportJob.fromJson(json);
-  }
-
   Future<void> _save(ExportJob job) async {
     await Storage.writeJson(_jobFile(job.id), job.toJson());
     if (!_changes.isClosed) _changes.add(job);
@@ -149,7 +142,7 @@ class ExportService {
       engineId: settings.engineId,
       voiceId: settings.voiceXuat,
       voiceName: voiceName,
-      speed: settings.speed,
+      speed: settings.speedXuat,
       pauseMs: settings.chunkPauseMs,
       // Máy không nén được (điện thoại) thì đừng hứa Opus rồi lại ra WAV.
       formatId: encoderAvailable ? settings.exportFormat.id : ExportFormat.wav.id,
@@ -180,7 +173,7 @@ class ExportService {
   /// Ước lượng thời gian còn lại của một job đang chạy.
   ///
   /// Tính từ nhịp thực tế của chính máy này (trung bình động), vì tốc độ tổng
-  /// hợp chênh nhau rất nhiều giữa giọng Edge và mô hình chạy trên GPU.
+  /// hợp chênh nhau rất nhiều giữa các engine và giữa máy mạnh với máy yếu.
   Duration? remainingFor(ExportJob job) {
     final control = _controls[job.id];
     if (control == null || control.secondsPerChunk <= 0) return null;
@@ -222,16 +215,6 @@ class ExportService {
       control.pause = true;
     } else if (job.isActive) {
       job.status = JobStatus.paused;
-      await _save(job);
-    }
-  }
-
-  Future<void> cancel(ExportJob job) async {
-    final control = _controls[job.id];
-    if (control != null) {
-      control.cancel = true;
-    } else if (job.status != JobStatus.done) {
-      job.status = JobStatus.canceled;
       await _save(job);
     }
   }
@@ -363,12 +346,9 @@ class ExportService {
   Future<void> _run(ExportJob job, List<Chunk> chunks, List<Chapter> chapters, _Control control) async {
     final targetSeconds = job.splitMode == SplitMode.duration ? job.partMinutes * 60.0 : double.infinity;
 
-    // Engine chạy trong ứng dụng trả về WAV chứ không phải MP3. Cách ghép khác
-    // nhau: MP3 nối thẳng khung dữ liệu và gắn thẻ ID3, WAV thì nối phần mẫu âm
-    // rồi dựng lại phần đầu file khi đóng.
-    final isWav = _tts.engine(job.engineId).audioFormat == 'wav';
-    // Định dạng đích của job. null khi engine trả về MP3 sẵn (không nén lại).
-    final dinhDang = isWav ? ExportFormat.fromId(job.formatId) : null;
+    // Mọi engine đều trả về WAV: nối phần mẫu âm lại rồi dựng phần đầu file khi
+    // đóng. Việc nén sang Opus/AAC/MP3 làm sau, lúc file WAV đã hoàn chỉnh.
+    final dinhDang = ExportFormat.fromId(job.formatId);
     var wavRate = 22050;
 
     // Chương lớn nhất của cả truyện, không phải của khoảng đang xuất: xuất lại
@@ -439,21 +419,11 @@ class ExportService {
         soChuongLonNhat: soChuongLonNhat,
         soThuTuFile: current.index + 1,
       );
-      // Luôn ghi WAV trước rồi mới nén, nên bước này lúc nào cũng là .wav khi
-      // engine trả về mẫu âm thô.
-      final fileName = '$tenGoc.${isWav ? 'wav' : 'mp3'}';
-      final target = File(p.join(job.outputDir, fileName));
+      // Luôn ghi WAV trước rồi mới nén.
+      final target = File(p.join(job.outputDir, '$tenGoc.wav'));
 
-      // WAV không có chỗ ghi tên sách như thẻ ID3 của MP3, chỉ cần đúng phần đầu
-      // mô tả số mẫu là mọi trình phát đọc được.
-      final header = isWav
-          ? wavHeader(frames.length, wavRate)
-          : buildId3(
-              title: partTitle,
-              artist: job.author.isEmpty ? 'Sách nói' : job.author,
-              album: job.bookTitle,
-              track: '${current.index + 1}',
-            );
+      // WAV chỉ cần đúng phần đầu mô tả số mẫu là mọi trình phát đọc được.
+      final header = wavHeader(frames.length, wavRate);
       final output = BytesBuilder()..add(header)..add(frames);
       await target.writeAsBytes(output.takeBytes(), flush: true);
       await file.delete();
@@ -462,7 +432,7 @@ class ExportService {
       // Opus lại với nhau là hỏng container, mà nén cả file một lần cũng cho ra
       // thời lượng và việc tua chính xác. Mất 5-9 giây cho một file 30 phút.
       var thanhPham = target;
-      if (dinhDang != null && !dinhDang.isWav) {
+      if (!dinhDang.isWav) {
         job.dangNen = true;
         job.nenPhan = null;
         _notify(job);
@@ -641,22 +611,15 @@ class ExportService {
       }
 
       final raw = doc.raw;
-      final Uint8List frames;
-      if (isWav) {
-        wavRate = readWavInfo(raw)?.sampleRate ?? wavRate;
-        frames = wavPcm(raw);
-      } else {
-        frames = stripTags(raw);
-      }
+      wavRate = readWavInfo(raw)?.sampleRate ?? wavRate;
+      final frames = wavPcm(raw);
 
       // Khoảng nghỉ giữa hai đoạn phải nằm trong chính file xuất ra, nghe thử
       // trong ứng dụng thế nào thì mở bằng máy khác cũng đúng như thế.
       final pause = pauseAfterChunk(heading: chunk.heading, pauseMs: job.pauseMs).inMilliseconds / 1000;
-      final silence = pause <= 0
-          ? Uint8List(0)
-          : isWav
-              ? Uint8List((wavRate * 2 * pause).round() & ~1) // 16-bit mono: chẵn byte
-              : silentFramesLike(frames, pause);
+      // 16-bit mono: số byte phải chẵn.
+      final silence =
+          pause <= 0 ? Uint8List(0) : Uint8List((wavRate * 2 * pause).round() & ~1);
 
       final sink = tmpFile().openWrite(mode: FileMode.append);
       sink.add(frames);

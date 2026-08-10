@@ -7,21 +7,22 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
-import 'fast_scrollbar.dart';
 import 'package:path/path.dart' as p;
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../core/chunker.dart';
 import '../models/book.dart';
+import '../models/export_job.dart';
 import '../models/settings.dart';
 import '../services/audio_encoder.dart';
-import '../models/export_job.dart';
 import '../services/storage.dart';
 import '../services/thu_muc_xuat.dart';
 import 'app_scope.dart';
 import 'chon_giong.dart';
-import 'kinh.dart';
+import 'cuon_tay_cam.dart';
+import 'fast_scrollbar.dart';
 import 'home_shell.dart';
+import 'kinh.dart';
 import 'nut_sac.dart';
 import 'theme.dart';
 
@@ -52,9 +53,11 @@ class _ExportPageState extends State<ExportPage> {
   /// này — tách khỏi PlayerController của cả cuốn sách vì đây chỉ nghe thử
   /// một file lẻ, không dính gì tới tiến trình đang đọc.
   final _xuatPlayer = _XuatPlayer();
+  final _cuon = ScrollController();
 
   @override
   void dispose() {
+    _cuon.dispose();
     _xuatPlayer.dispose();
     super.dispose();
   }
@@ -84,7 +87,7 @@ class _ExportPageState extends State<ExportPage> {
 
     final selected = chapters.where((c) => c.index >= from.index && c.index <= effectiveTo.index).toList();
     final chars = selected.fold<int>(0, (sum, c) => sum + c.charCount);
-    final seconds = estimateSeconds(chars, rate: state.settings.speed);
+    final seconds = estimateSeconds(chars, rate: state.settings.speedXuat);
     final settings = state.settings;
 
     final partCount = switch (settings.splitMode) {
@@ -92,11 +95,8 @@ class _ExportPageState extends State<ExportPage> {
       SplitMode.single => 1,
       SplitMode.duration => (seconds / (settings.partMinutes * 60)).ceil().clamp(1, 9999),
     };
-    // MP3 64 kbps so với WAV 22 kHz 16-bit — chênh nhau gần năm lần, phải nói
-    // trước để người dùng khỏi bất ngờ khi xuất cả cuốn sách.
-    final isWav = state.tts.engine(settings.engineId).audioFormat == 'wav';
     // Máy nào không nén được thì mọi lựa chọn đều ra WAV, nói thật ngay ở đây.
-    final dinhDang = (isWav && encoderAvailable) ? settings.exportFormat : ExportFormat.wav;
+    final dinhDang = encoderAvailable ? settings.exportFormat : ExportFormat.wav;
     // kbps thật của từng mức: WAV 48 kHz 16-bit mono là 768, Opus/MP3 theo bitrate.
     final kbps = switch (dinhDang) {
       ExportFormat.wav => 768.0,
@@ -107,7 +107,10 @@ class _ExportPageState extends State<ExportPage> {
 
     final jobs = state.jobs.where((j) => j.bookId == book.id).toList();
 
-    return ListView(
+    return CuonTayCam(
+      controller: _cuon,
+      child: ListView(
+      controller: _cuon,
       padding: const EdgeInsets.fromLTRB(22, 20, 22, 26),
       children: [
         Text('Xuất ra file âm thanh', style: Theme.of(context).textTheme.headlineSmall),
@@ -175,29 +178,47 @@ class _ExportPageState extends State<ExportPage> {
                           },
                         ),
                       ),
-                    if (isWav)
-                      _field(
-                        'Định dạng file',
-                        DropdownButton<ExportFormat>(
-                          value: dinhDang,
-                          isExpanded: true,
-                          underline: const SizedBox.shrink(),
-                          onChanged: encoderAvailable
-                              ? (value) async {
-                                  if (value == null) return;
-                                  settings.exportFormat = value;
-                                  await AppScope.read(context).saveSettings();
-                                }
-                              : null,
-                          items: [
-                            for (final f in ExportFormat.values)
-                              DropdownMenuItem(
-                                value: f,
-                                child: Text(f.label, overflow: TextOverflow.ellipsis),
-                              ),
-                          ],
-                        ),
+                    _field(
+                      'Tốc độ đọc',
+                      DropdownButton<double>(
+                        value: tocDoChon.contains(settings.speedXuat)
+                            ? settings.speedXuat
+                            : 1.0,
+                        isExpanded: true,
+                        underline: const SizedBox.shrink(),
+                        items: [
+                          for (final s in tocDoChon)
+                            DropdownMenuItem(value: s, child: Text(nhanTocDo(s))),
+                        ],
+                        onChanged: (value) async {
+                          if (value == null) return;
+                          settings.speedXuat = value;
+                          await AppScope.read(context).saveSettings();
+                        },
                       ),
+                    ),
+                    _field(
+                      'Định dạng file',
+                      DropdownButton<ExportFormat>(
+                        value: dinhDang,
+                        isExpanded: true,
+                        underline: const SizedBox.shrink(),
+                        onChanged: encoderAvailable
+                            ? (value) async {
+                                if (value == null) return;
+                                settings.exportFormat = value;
+                                await AppScope.read(context).saveSettings();
+                              }
+                            : null,
+                        items: [
+                          for (final f in ExportFormat.values)
+                            DropdownMenuItem(
+                              value: f,
+                              child: Text(f.label, overflow: TextOverflow.ellipsis),
+                            ),
+                        ],
+                      ),
+                    ),
                     _field(
                       'Từ chương',
                       _ChonChuong(
@@ -273,8 +294,11 @@ class _ExportPageState extends State<ExportPage> {
                     'chia thành $partCount file ${dinhDang.extension.toUpperCase()}, '
                     '~${megabytes < 10 ? megabytes.toStringAsFixed(1) : megabytes.round()} MB.\n'
                     'Giọng: ${state.voices.where((v) => v.id == settings.voiceXuat).map((v) => v.name).firstOrNull ?? settings.voiceXuat}'
-                    ' · tốc độ ${settings.speed}× (được ghi thẳng vào file)'
-                    '${isWav ? '\nWAV không nén nên nặng nhất — chọn Opus thì nhỏ hơn khoảng 30 lần mà nghe gần như không khác. Đổi ở mục '
+                    ' · tốc độ ${nhanTocDo(settings.speedXuat)} (được ghi thẳng vào file)'
+                    // Chỉ khuyên đổi khi đang thật sự chọn WAV — trước đây xét
+                    // nhầm cờ "engine trả WAV" (luôn đúng) nên câu này hiện cả
+                    // khi người dùng đã chọn Opus rồi.
+                    '${dinhDang.isWav ? '\nWAV không nén nên nặng nhất — chọn Opus thì nhỏ hơn khoảng 30 lần mà nghe gần như không khác. Đổi ở mục '
                         'Định dạng file phía trên.' : ''}',
                     style: const TextStyle(fontSize: 13, height: 1.5),
                   ),
@@ -328,6 +352,7 @@ class _ExportPageState extends State<ExportPage> {
             ),
           ),
       ],
+      ),
     );
   }
 
@@ -1106,10 +1131,6 @@ class _XuatPlayer extends ChangeNotifier {
   }
 }
 
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
-}
-
 /// Chọn một chương trong danh sách dài.
 ///
 /// Thay cho DropdownButton: với 2.466 chương thì menu buông xuống dựng cả 2.466
@@ -1284,7 +1305,6 @@ class _BangChonChuongState extends State<_BangChonChuong> {
     );
   }
 }
-
 
 /// Ô chọn sách để xuất, ngay trong màn hình xuất file.
 ///

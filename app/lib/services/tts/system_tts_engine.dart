@@ -65,9 +65,6 @@ class SystemTtsEngine implements TtsEngine {
           'việc có giọng tiếng Việt hay không tuỳ từng máy.'
       : 'Chưa hỗ trợ trên nền tảng này.';
 
-  @override
-  String get audioFormat => 'wav';
-
   /// Giọng của hệ thống đọc theo luật — đọc lại cũng ra đúng bản cũ.
   @override
   bool get docLaiRaKhac => false;
@@ -96,7 +93,7 @@ class SystemTtsEngine implements TtsEngine {
                 'Ngôn ngữ & nhập liệu → Chuyển văn bản thành giọng nói.',
       );
     }
-    return const EngineStatus(ready: true, message: 'Sẵn sàng', device: 'hệ thống');
+    return const EngineStatus(ready: true, message: 'Sẵn sàng');
   }
 
   @override

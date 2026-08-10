@@ -117,14 +117,10 @@ class OnDeviceVieNeuEngine implements TtsEngine {
   String get description =>
       'Mô hình chạy thẳng trên máy, không cần mạng. Đọc nhanh hơn tốc độ nghe.';
 
-  /// Mô hình sinh ra mẫu âm thô; ứng dụng tự đóng gói WAV.
-  @override
-  String get audioFormat => 'wav';
-
   @override
   Future<EngineStatus> status() async {
     if (_native != null) {
-      return const EngineStatus(ready: true, message: 'Sẵn sàng', device: 'cpu');
+      return const EngineStatus(ready: true, message: 'Sẵn sàng');
     }
     if (_error != null) {
       return EngineStatus(ready: false, message: _error!);
@@ -378,9 +374,3 @@ class TtsExceptionMissingModel implements Exception {
   String toString() => 'Chưa tải mô hình giọng đọc';
 }
 
-extension _FirstOrNull<T> on List<T> {
-  T? get firstOrNull => isEmpty ? null : first;
-}
-
-/// Cho phép engine báo lỗi mà không cần import chéo.
-Future<bool> modelInstalled(Directory dir) => dir.exists();
