@@ -12,5 +12,7 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    // Giọng đọc hệ thống — tự nối lấy, xem apple/GiongHeThong.swift.
+    GiongHeThong.dangKy(engineBridge.pluginRegistry.registrar(forPlugin: "GiongHeThong")!)
   }
 }

@@ -1,26 +1,52 @@
 import AVFoundation
-import FlutterMacOS
 import Foundation
 
-/// Cổng sang giọng đọc hệ thống của macOS (AVSpeechSynthesizer).
+#if os(iOS)
+  import Flutter
+#else
+  import FlutterMacOS
+#endif
+
+/// Cổng sang giọng đọc hệ thống của Apple (AVSpeechSynthesizer). **Dùng chung
+/// cho cả macOS lẫn iOS** — file này nằm ngoài hai thư mục platform
+/// (`app/apple/`) và được cả hai project Xcode biên dịch.
 ///
-/// Vì sao không dùng thẳng `flutter_tts` như Android/iOS: bản macOS của gói ấy
-/// có `synthesizeToFile`, nhưng nó dựng `AVSpeechUtterance` rồi ghi ra file mà
+/// Vì sao không dùng thẳng `flutter_tts` như Android: gói ấy hỏng ở cả hai bản
+/// Apple, mỗi bản một kiểu.
+///
+/// **macOS** — `synthesizeToFile` dựng `AVSpeechUtterance` rồi ghi ra file mà
 /// **không gán giọng, không gán tốc độ** (khác hẳn nhánh `speak` ngay bên trên
-/// trong cùng file, và khác hẳn bản iOS) — nên chọn giọng gì cũng đọc bằng
-/// giọng mặc định của hệ thống, kéo thanh tốc độ cũng không đổi gì. Nó lại còn
-/// bỏ qua cờ `isFullPath` và luôn ghi vào thư mục Documents của app. Cả ba thứ
-/// đều nằm trong hàm của gói, Dart không với tới được, nên phần macOS tự làm
-/// lấy ở đây.
+/// trong cùng file), nên chọn giọng gì cũng đọc bằng giọng mặc định của hệ
+/// thống, kéo thanh tốc độ cũng không đổi gì. Nó lại còn bỏ qua cờ `isFullPath`
+/// và luôn ghi vào thư mục Documents của app.
+///
+/// **iOS** — có gán giọng và tốc độ, nhưng sai hai chỗ nữa:
+///
+///  1. Tốc độ truyền thẳng vào `utterance.rate`, mà thang ấy lấy 0.5 làm mốc
+///     bình thường — hệ số 1.0× của ứng dụng hoá ra đọc nhanh hết cỡ. Xem
+///     [rateAV].
+///  2. Ghi ra WAV **float 32-bit**. Cả ứng dụng giả định PCM 16-bit:
+///     `core/wav.dart` dựng lại phần đầu file WAV theo 16-bit khi chèn khoảng
+///     lặng giữa hai đoạn, nên dữ liệu float bị đọc như Int16 — nghe ra tiếng
+///     rè và nhanh gấp đôi. `core/kiem_am.dart` cũng đếm nhân âm trên mẫu Int16
+///     và lặng lẽ bỏ qua file float.
+///
+/// Cả bốn thứ đều nằm trong hàm của gói, Dart không với tới được.
 ///
 /// Xem `app/lib/services/tts/system_tts_engine.dart` cho phía Dart.
 class GiongHeThong: NSObject {
   private let synthesizer = AVSpeechSynthesizer()
 
   static func dangKy(_ registrar: FlutterPluginRegistrar) {
+    // `messenger` là thuộc tính bên macOS nhưng là hàm bên iOS.
+    #if os(iOS)
+      let messenger = registrar.messenger()
+    #else
+      let messenger = registrar.messenger
+    #endif
     let kenh = FlutterMethodChannel(
       name: "sachnoi/tts_he_thong",
-      binaryMessenger: registrar.messenger)
+      binaryMessenger: messenger)
     let noi = GiongHeThong()
     kenh.setMethodCallHandler { goi, tra in
       noi.xuLy(goi, tra)
@@ -71,7 +97,8 @@ class GiongHeThong: NSObject {
   /// Thang ấy không lấy 1.0 làm mốc bình thường: 0.5
   /// (`AVSpeechUtteranceDefaultSpeechRate`) mới là giọng đọc bình thường, còn
   /// 1.0 là nhanh hết cỡ — truyền thẳng hệ số của ứng dụng vào thì "1.0×" hoá
-  /// ra đọc nhanh nhất có thể (đúng lỗi bản iOS của `flutter_tts` đang mắc).
+  /// ra đọc nhanh nhất có thể. Đó đúng là lỗi bản iOS của `flutter_tts` mắc, và
+  /// là một nửa lý do bản iPad 1.6.0a đọc như chạy.
   ///
   /// Hai hệ số dưới đây đo thật trên giọng Linh, đọc cùng một câu ở từng nấc
   /// rate rồi lấy số mẫu ra: trên mốc mặc định, quan hệ gần như thẳng —
@@ -130,8 +157,11 @@ class GiongHeThong: NSObject {
       }
       do {
         if file == nil {
-          // Ghi ra WAV 16-bit: `kiem_am` bên Dart đếm nhân âm trên mẫu Int16,
-          // gặp WAV float là bỏ qua không đo được. AVAudioFile tự chuyển từ
+          // Ghi ra WAV 16-bit, đây là chỗ quan trọng nhất của cả file. Cả ứng
+          // dụng giả định PCM 16-bit: `core/wav.dart` dựng lại phần đầu WAV
+          // theo 16-bit khi chèn khoảng lặng, và `core/kiem_am.dart` đếm nhân
+          // âm trên mẫu Int16. Buffer của AVSpeechSynthesizer là float 32-bit,
+          // để nguyên thì hai chỗ ấy hiểu sai dữ liệu. AVAudioFile tự chuyển từ
           // định dạng của buffer sang định dạng file, nên chỉ cần khai khác đi
           // ở phần settings.
           var caiDat = pcm.format.settings

@@ -7,12 +7,16 @@
 ///
 /// Hai đường khác nhau:
 ///
-///   Android/iOS — `flutter_tts.synthesizeToFile`, chạy đúng như quảng cáo.
-///   macOS       — cổng riêng `sachnoi/tts_he_thong` viết bằng Swift trong
-///                 Runner. Bản macOS của `flutter_tts` cũng có
-///                 `synthesizeToFile` nhưng nó không gán giọng lẫn tốc độ vào
-///                 câu đọc, nên chọn gì cũng ra giọng mặc định của máy —
-///                 xem ghi chú dài trong `macos/Runner/GiongHeThong.swift`.
+///   Android    — `flutter_tts.synthesizeToFile`, chạy đúng như quảng cáo.
+///   macOS/iOS  — cổng riêng `sachnoi/tts_he_thong` viết bằng Swift, dùng chung
+///                cho cả hai (`app/apple/GiongHeThong.swift`).
+///
+/// **Đừng đưa iOS về lại `flutter_tts`.** Bản iOS của gói ấy sai hai chỗ, và
+/// hai chỗ ấy nhân với nhau: nó truyền thẳng hệ số tốc độ vào `utterance.rate`
+/// (thang lấy 0.5 làm mốc bình thường, nên "1.0×" là đọc nhanh hết cỡ), rồi ghi
+/// ra WAV **float 32-bit** trong khi cả ứng dụng giả định PCM 16-bit — nghe ra
+/// tiếng rè và nhanh thêm gấp đôi nữa. Bản 1.6.0a từng đi đường ấy trên iPad.
+/// Chi tiết trong `GiongHeThong.swift`.
 ///
 /// Windows thì `flutter_tts` chỉ phát thẳng qua loa, mà Windows cũng chưa có
 /// giọng tiếng Việt hệ thống, nên engine báo "không sẵn sàng" ở đó.
@@ -29,8 +33,8 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/wav.dart';
 import 'tts_engine.dart';
 
-/// Cổng sang AVSpeechSynthesizer của macOS. Xem `macos/Runner/GiongHeThong.swift`.
-const _kenhMacOS = MethodChannel('sachnoi/tts_he_thong');
+/// Cổng sang AVSpeechSynthesizer của Apple. Xem `app/apple/GiongHeThong.swift`.
+const _kenhApple = MethodChannel('sachnoi/tts_he_thong');
 
 class SystemTtsEngine implements TtsEngine {
   final FlutterTts _tts = FlutterTts();
@@ -74,8 +78,9 @@ class SystemTtsEngine implements TtsEngine {
 
   bool get _hoTro => Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
 
-  /// macOS đi đường riêng qua [_kenhMacOS] thay vì `flutter_tts`.
-  bool get _quaKenhRieng => Platform.isMacOS;
+  /// Máy Apple đi đường riêng qua [_kenhApple] thay vì `flutter_tts` — xem ghi
+  /// chú ở đầu file.
+  bool get _quaKenhRieng => Platform.isMacOS || Platform.isIOS;
 
   @override
   Future<EngineStatus> status() async {
@@ -89,11 +94,14 @@ class SystemTtsEngine implements TtsEngine {
     if (list.isEmpty) {
       return EngineStatus(
         ready: false,
-        message: Platform.isMacOS
-            ? 'Máy chưa có giọng tiếng Việt hệ thống — cài trong Cài đặt hệ thống → '
-                'Trợ năng → Nội dung đọc → Giọng nói hệ thống → Quản lý giọng nói.'
-            : 'Máy chưa có giọng tiếng Việt hệ thống — cài trong Cài đặt máy → '
-                'Ngôn ngữ & nhập liệu → Chuyển văn bản thành giọng nói.',
+        message: switch (Platform.operatingSystem) {
+          'macos' => 'Máy chưa có giọng tiếng Việt hệ thống — cài trong Cài đặt hệ thống → '
+              'Trợ năng → Nội dung đọc → Giọng nói hệ thống → Quản lý giọng nói.',
+          'ios' => 'Máy chưa có giọng tiếng Việt hệ thống — cài trong Cài đặt → '
+              'Trợ năng → Nội dung đọc → Giọng nói → Tiếng Việt.',
+          _ => 'Máy chưa có giọng tiếng Việt hệ thống — cài trong Cài đặt máy → '
+              'Ngôn ngữ & nhập liệu → Chuyển văn bản thành giọng nói.',
+        },
       );
     }
     return const EngineStatus(ready: true, message: 'Sẵn sàng');
@@ -105,7 +113,7 @@ class SystemTtsEngine implements TtsEngine {
     final cached = _voiceCache;
     if (cached != null) return cached;
 
-    if (_quaKenhRieng) return _voiceCache = await _giongMacOS();
+    if (_quaKenhRieng) return _voiceCache = await _giongApple();
 
     try {
       final raw = await _tts.getVoices as List<dynamic>?;
@@ -157,10 +165,10 @@ class SystemTtsEngine implements TtsEngine {
     return lot;
   }
 
-  /// Danh sách giọng tiếng Việt của macOS, hỏi qua [_kenhMacOS].
-  Future<List<TtsVoice>> _giongMacOS() async {
+  /// Danh sách giọng tiếng Việt của máy Apple, hỏi qua [_kenhApple].
+  Future<List<TtsVoice>> _giongApple() async {
     try {
-      final raw = await _kenhMacOS.invokeListMethod<Object?>('giong');
+      final raw = await _kenhApple.invokeListMethod<Object?>('giong');
       final list = <TtsVoice>[];
       for (final item in raw ?? const []) {
         final map = Map<String, String>.from(item as Map);
@@ -186,7 +194,7 @@ class SystemTtsEngine implements TtsEngine {
     final file = File(p.join(dir.path, 'system_tts_${DateTime.now().microsecondsSinceEpoch}_${_seq++}.wav'));
 
     if (_quaKenhRieng) {
-      await _docMacOS(text, voiceId, speed, file);
+      await _docApple(text, voiceId, speed, file);
       return _doc(file);
     }
 
@@ -214,10 +222,10 @@ class SystemTtsEngine implements TtsEngine {
     return _doc(file);
   }
 
-  /// macOS: nhờ AVSpeechSynthesizer ghi thẳng ra [file].
-  Future<void> _docMacOS(String text, String voiceId, double speed, File file) async {
+  /// macOS/iOS: nhờ AVSpeechSynthesizer ghi thẳng ra [file] (WAV 16-bit).
+  Future<void> _docApple(String text, String voiceId, double speed, File file) async {
     try {
-      await _kenhMacOS.invokeMethod<String>('doc', {
+      await _kenhApple.invokeMethod<String>('doc', {
         'text': text,
         'giongId': voiceId,
         'tocDo': speed,
@@ -229,7 +237,7 @@ class SystemTtsEngine implements TtsEngine {
     } on PlatformException catch (err) {
       throw TtsException('TTS hệ thống lỗi: ${err.message ?? err}');
     } on MissingPluginException {
-      throw TtsException('Bản này chưa nối giọng hệ thống của macOS');
+      throw TtsException('Bản này chưa nối giọng hệ thống của Apple');
     }
   }
 
