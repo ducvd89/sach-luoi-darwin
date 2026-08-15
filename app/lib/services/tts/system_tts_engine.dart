@@ -69,6 +69,9 @@ class SystemTtsEngine implements TtsEngine {
   @override
   bool get docLaiRaKhac => false;
 
+  @override
+  bool get noiNguCanh => false;
+
   bool get _hoTro => Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
 
   /// macOS đi đường riêng qua [_kenhMacOS] thay vì `flutter_tts`.

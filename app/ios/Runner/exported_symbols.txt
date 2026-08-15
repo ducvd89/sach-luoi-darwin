@@ -6,8 +6,17 @@ _vieneu_*
 _sea_g2p_*
 _sachnoi_*
 
-# Bản Debug/Profile không nạp thẳng file thực thi: Xcode dựng Runner.debug.dylib
-# rồi một stub nhỏ dlsym("main") trong đó. Danh sách này áp cho cả lần link ấy,
-# nên thiếu _main là stub không tìm ra điểm vào và app tắt ngay lúc mở
-# ("abort_could_not_find_entry_point___debug_dylib"), chỉ Release chạy được.
+# Bản Profile không nạp thẳng file thực thi: Xcode dựng Runner.debug.dylib rồi
+# một stub nhỏ dlsym("main") trong đó. Danh sách này áp cho cả lần link ấy, nên
+# thiếu _main là stub không tìm ra điểm vào và app tắt ngay lúc mở
+# ("abort_could_not_find_entry_point___debug_dylib").
+#
+# Bản Debug KHÔNG dùng danh sách này nữa (bỏ EXPORTED_SYMBOLS_FILE khỏi cấu hình
+# Debug trong project). Từ Xcode 26, bản Debug còn dựng thêm `__preview.dylib`
+# cho Xcode Previews, và nó dùng chung danh sách export của target — mà trình
+# liên kết coi mọi tên trong danh sách là "initial undefine", tức là bắt buộc
+# phải có. `__preview.dylib` không có main, nên dòng _main dưới đây làm hỏng
+# thẳng bản Debug: "Undefined symbol: _main, referenced from <initial-undefines>".
+# Bỏ danh sách khỏi Debug là xong: không strip thì mọi symbol đều còn, Dart vẫn
+# dlsym ra được, và bản Release — nơi việc strip mới có ý nghĩa — không đổi gì.
 _main

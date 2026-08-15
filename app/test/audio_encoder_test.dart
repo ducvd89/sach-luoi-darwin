@@ -14,16 +14,9 @@ import 'package:path/path.dart' as p;
 import 'package:sach_noi/core/wav.dart';
 import 'package:sach_noi/services/audio_encoder.dart';
 
-/// Các chỗ có thể có bản dựng release của thư viện native. Đường Windows là
-/// tuyệt đối vì bản gốc dựng ở đó; trên macOS thì dò theo repo, `flutter test`
-/// chạy với thư mục hiện hành là `app/`. Xem `dung-native-apple.sh` để dựng.
-const _cacDuongLib = [
-  r'C:\Software\Ebookreader\native\vieneu\target\release\sachnoi_vieneu.dll',
-  '../native/vieneu/target/aarch64-apple-darwin/release/libsachnoi_vieneu.dylib',
-  '../native/vieneu/target/release/libsachnoi_vieneu.dylib',
-];
+import 'duong_dan_repo.dart';
 
-final String? _lib = _cacDuongLib.where((d) => File(d).existsSync()).firstOrNull;
+final _lib = vieneuLibPath;
 
 /// Một giây sóng sin — đủ để bộ mã hoá có việc thật.
 Uint8List _wavMotGiay() {
@@ -35,7 +28,7 @@ Uint8List _wavMotGiay() {
 }
 
 /// Có thư viện native đã dựng để mà gọi không.
-bool _coThuVien() => _lib != null && encoderAvailable;
+bool _coThuVien() => File(_lib).existsSync() && encoderAvailable;
 
 void main() {
   late Directory dir;
