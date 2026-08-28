@@ -1,6 +1,6 @@
 /// Engine Piper chạy thẳng trong ứng dụng qua sherpa-onnx.
 ///
-/// Nhẹ hơn VieNeu khoảng mười lần và không cần tải mô hình 206 MB, đổi lại
+/// Nhẹ hơn VieNeu khoảng mười lần và không cần tải mô hình 145 MB, đổi lại
 /// giọng máy hơn. Giữ làm lựa chọn cho máy yếu, cho lúc muốn đọc nhanh, hoặc
 /// khi chưa muốn tải mô hình lớn.
 library;
@@ -115,6 +115,10 @@ class OnDeviceTtsEngine implements TtsEngine {
   /// Piper đọc theo luật, mỗi đoạn độc lập — không có gì để nối.
   @override
   bool get noiNguCanh => false;
+
+  /// Piper đọc gần như tức thì nên không có gì đáng cắt giữa chừng.
+  @override
+  void huyDangDoc() {}
 
   @override
   Future<EngineStatus> status() async {
