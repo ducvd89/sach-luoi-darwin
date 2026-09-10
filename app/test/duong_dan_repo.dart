@@ -7,8 +7,10 @@
 /// thì đặt repo ở đâu cũng đúng.
 library;
 
+import 'dart:ffi';
 import 'dart:io';
 
+import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 
 /// Gốc của repo. `flutter test` chạy với thư mục hiện hành là gói `app/`, nên
@@ -51,3 +53,42 @@ final String assetsDir = p.join(repoRoot, 'app', 'assets');
 
 /// Thư mục script Python chuẩn bị dữ liệu.
 final String ttsServiceDir = p.join(repoRoot, 'tts_service');
+
+/// Bản ONNX Runtime đóng gói sẵn trong repo cho máy Mac — cùng file mà bản
+/// macOS chép vào `Contents/Frameworks` lúc đóng gói.
+final String onnxRuntimePath =
+    p.join(repoRoot, 'native', 'vendor', 'onnxruntime', 'macos-arm64', 'libonnxruntime.dylib');
+
+/// Trỏ `ort` vào bản ONNX Runtime của repo, cho các bài test có gọi tới engine
+/// chạy bằng ONNX (v3 Turbo, Matcha).
+///
+/// Vì sao cần: `ort` dùng chế độ `load-dynamic`, tức nạp libonnxruntime lúc
+/// chạy. Trong ứng dụng thật thì `configureOnnxRuntimeForMacOS()` lo việc này,
+/// nhưng nó suy đường dẫn từ `Platform.resolvedExecutable` — trong `flutter
+/// test` không có app bundle nào để mà suy. Bản Windows thoát vì DLL nằm ngay
+/// cạnh file thực thi.
+///
+/// Không nạp được thì `ort` **panic**, mà crate dựng với `panic = "abort"`, nên
+/// cả tiến trình test chết bằng SIGABRT — kéo theo mọi bài khác trong cùng file,
+/// kể cả những bài thuần Dart không đụng gì tới native. Vì thế phải gọi hàm này
+/// trong `setUpAll` chứ không phải bọc `try` quanh từng bài.
+///
+/// Gọi trước lượt mở phiên ONNX đầu tiên: `ort` chỉ đọc biến này đúng một lần.
+/// Ai đã tự đặt sẵn `ORT_DYLIB_PATH` thì giữ nguyên ý họ.
+void chuanBiOnnxRuntime() {
+  if (!Platform.isMacOS) return;
+  if ((Platform.environment['ORT_DYLIB_PATH'] ?? '').isNotEmpty) return;
+  if (!File(onnxRuntimePath).existsSync()) return;
+
+  final setenvFn = DynamicLibrary.process().lookupFunction<
+      Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Int32),
+      int Function(Pointer<Utf8>, Pointer<Utf8>, int)>('setenv');
+  final k = 'ORT_DYLIB_PATH'.toNativeUtf8();
+  final v = onnxRuntimePath.toNativeUtf8();
+  try {
+    setenvFn(k, v, 1);
+  } finally {
+    calloc.free(k);
+    calloc.free(v);
+  }
+}

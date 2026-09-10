@@ -35,9 +35,18 @@ const _renamedEngines = {'kani': 'vieneu'};
 /// có mục nào được chọn và engine trỏ vào hư không.
 bool get coEngineV2 => true;
 
+/// Engine Matcha nằm trong cùng thư viện native với hai bản VieNeu, nên có ở
+/// đúng những nền tảng ấy — kể cả iOS, nơi `dung-native-apple.sh` dựng chung
+/// một file `.a` cho cả ba engine (upstream để iOS ngoài vì bên đó chưa dựng).
+///
+/// Giữ cờ riêng thay vì dùng chung [coEngineV2]: hai engine tải riêng và có thể
+/// gỡ riêng, gộp cờ là lần sau sửa một cái hỏng cái kia.
+bool get coEngineMatcha => true;
+
 String migrateEngineId(String id) {
   final moi = _renamedEngines[id] ?? id;
   if (moi == 'vieneu_v2' && !coEngineV2) return 'vieneu';
+  if (moi == 'matcha' && !coEngineMatcha) return 'vieneu';
   return moi;
 }
 
