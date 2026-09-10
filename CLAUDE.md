@@ -96,9 +96,18 @@ Cần `brew install cmake` — engine v2 kéo `llama-cpp-sys-2`, và nó dựng 
 cmake. Trên máy Mac thì không phải chỉ đường gì thêm cho Android/iOS: cmake của Homebrew
 biết biên dịch chéo sang iOS, chỉ mức iOS tối thiểu là phải tự đặt (xem Cạm bẫy).
 
-**Chạy lại script sau MỖI lần trộn bản mới từ upstream.** Bản iOS liên kết tĩnh từ hai file
-`.a` nằm sẵn trong repo — mã Rust bên upstream đổi mà không dựng lại thì hai file ấy thành
-đồ cũ, và không có gì báo ngoài việc chạy thật thì thấy sai.
+**Hai file `.a` của iOS KHÔNG nằm trong repo** (đã cho vào `.gitignore` từ 1.7.1a) — chúng
+là sản phẩm dựng, mỗi file 74 MB và đổi theo mọi lần build, mà trần cứng của GitHub là
+100 MB một file. Nên clone về là phải chạy script trước, không thì Xcode báo thiếu symbol
+của `libsachnoi_vieneu` mà không nói vì sao:
+
+```bash
+./dung-native-apple.sh ios
+```
+
+**Và chạy lại sau MỖI lần trộn bản mới từ upstream.** Mã Rust bên upstream đổi mà không
+dựng lại thì hai file `.a` trên máy thành đồ cũ — lần này thì KHÔNG có gì báo cả, kể cả
+Xcode, vì file vẫn tồn tại và vẫn liên kết được. Chỉ chạy thật mới thấy sai.
 
 ```bash
 cd app && flutter run -d macos
@@ -583,7 +592,7 @@ Ba khác biệt so với Windows/Android, tất cả nằm ở chỗ **nạp th�
 
 | | macOS | iOS |
 |---|---|---|
-| Thư viện Rust | `.dylib` rời trong `Contents/Frameworks` | `.a` tĩnh trong xcframework, liên kết thẳng vào file thực thi |
+| Thư viện Rust | `.dylib` rời trong `Contents/Frameworks` | `.a` tĩnh trong xcframework, liên kết thẳng vào file thực thi (không có trong repo, phải tự dựng) |
 | Dart nạp bằng | `DynamicLibrary.open` với đường dẫn **tuyệt đối** | `DynamicLibrary.process()` |
 | ONNX Runtime | `.dylib` đóng gói kèm, trỏ bằng `ORT_DYLIB_PATH` | `.xcframework` tĩnh, `ort` tắt `load-dynamic` |
 

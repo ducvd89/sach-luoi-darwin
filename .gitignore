@@ -5,6 +5,23 @@
 # Rust — riêng thư mục target đã gần 1 GB toàn file trung gian
 native/*/target/
 
+# Thư viện tĩnh cho iOS: SẢN PHẨM DỰNG, không phải file nguồn.
+#
+# Chúng là bản sao y nguyên thứ `dung-native-apple.sh` sinh ra từ native/vieneu
+# (đối chiếu byte thấy giống hệt), nên giữ trong repo chỉ tổ phình: mỗi file
+# 74 MB, đổi theo mọi lần dựng lại, và GitHub cảnh báo vượt mức 50 MB khuyến
+# nghị mỗi lần push. Trần CỨNG của GitHub là 100 MB một file — file này đã đi từ
+# 52 MB lên 74 MB kể từ khi có llama.cpp, nên đây cũng là cách tránh cái ngày nó
+# chạm trần rồi bị từ chối push.
+#
+# Cái giá: clone về là KHÔNG dựng được bản iOS ngay, phải chạy
+# `./dung-native-apple.sh ios` trước (cần Rust và cmake). Thiếu nó thì Xcode báo
+# lỗi liên kết chứ không nói gì về nguyên nhân — xem CLAUDE.md.
+#
+# Info.plist của xcframework thì VẪN theo dõi: nó là thứ khai cấu trúc, không ai
+# sinh lại được.
+native/vendor/xcframeworks/*/*/*.a
+
 # Bản đóng gói: dựng lại bằng dong-goi.ps1 và flutter build apk
 dist/
 
