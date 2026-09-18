@@ -130,6 +130,12 @@ thực ra không kiểm gì. Muốn chạy đủ phải có **cả ba**:
 3. Biến môi trường `ORT_DYLIB_PATH` trỏ vào một bản ONNX Runtime — `ort` dùng
    `load-dynamic` nên nạp lúc chạy chứ không liên kết lúc build.
 
+Bài kiểm âm thật (`app/test/wav2vec2_that_test.dart`) cần thêm `MO_HINH_KIEM_AM`,
+`WAV_KIEM_AM` và `LOI_KIEM_AM`; thiếu thì nó tự báo bỏ qua. Trên máy Mac bài ấy gọi
+`chuanBiOnnxRuntime()` trong `setUpAll` để tự trỏ `ORT_DYLIB_PATH` vào bản dylib trong
+repo — thiếu bước ấy thì `ort` panic lúc mở phiên và giết cả tiến trình test, vì crate
+dựng với `panic = "abort"`.
+
 Đường dẫn tới file ngoài gói `app/` phải lấy qua `app/test/duong_dan_repo.dart`, đừng gán
 cứng đường dẫn tuyệt đối — repo từng gán cứng đường dẫn máy tác giả nên mọi bài cần mô
 hình đều lặng lẽ bị bỏ qua ở máy khác.
@@ -302,8 +308,8 @@ Ba chỗ dễ sai nhất, đều đã đo:
   hẳn file ấy — các đoạn độc lập, đọc trước song song được.
 - **`docLaiRaKhac` là `false`.** Đổi hạt giống chỉ đổi nhiễu khởi tạo của bộ giải ODE; độ
   dài đoạn do bộ đoán độ dài quyết định và nó tất định. Đo năm hạt giống trên cùng một câu:
-  thời lượng giống hệt nhau tới từng mẫu (6,478 s). Nghĩa là `core/kiem_am.dart` đếm ra
-  đúng chừng ấy nhân âm ở mọi lần đọc lại — bật cờ lên là đọc lại năm lần rồi hỏng y hệt.
+  thời lượng giống hệt nhau tới từng mẫu (6,478 s). Nghĩa là bộ kiểm âm nhận ra đúng
+  chừng ấy nhân âm ở mọi lần đọc lại — bật cờ lên là đọc lại năm lần rồi hỏng y hệt.
 - **Tốc độ đi vào mô hình, không phải vào phép lấy mẫu lại.** `length_scale = 1/tốc độ`
   nên xuất file ở 1,25× thì cao độ giữ nguyên, khác hai engine kia. Đo được đúng tuyến
   tính: 0,8× ra 5,178 s, 1,0× ra 6,478 s, 1,25× ra 8,104 s.
@@ -437,9 +443,36 @@ thấy ngay và cache vẫn dùng được. Khoảng nghỉ giữa các đoạn 
 file chứ không nằm trong âm thanh đã tổng hợp.
 
 `export_service.dart`: job dừng và chạy tiếp được kể cả sau khi tắt ứng dụng — trạng thái ở
-`job.json`, phần đang ghi dở ở file `.part`, âm thanh từng đoạn ở cache. Sau mỗi đoạn,
-`core/kiem_am.dart` đếm số nhân âm nghe được rồi so với số âm tiết mà văn bản đáng lẽ đọc
-ra; lệch quá thì đọc lại bằng hạt giống khác, tối đa 5 lần, cuối cùng lấy bản gần đúng nhất.
+`job.json`, phần đang ghi dở ở file `.part`, âm thanh từng đoạn ở cache. Sau mỗi đoạn, bộ
+kiểm âm đếm số nhân âm nghe được rồi so với số âm tiết mà văn bản đáng lẽ đọc ra; lệch quá
+thì đọc lại bằng hạt giống khác, tối đa 5 lần, cuối cùng lấy bản gần đúng nhất.
+
+#### Đếm âm phía âm thanh: wav2vec2, KHÔNG phải đỉnh sóng
+
+Từ 1.7.2 vế âm thanh do **wav2vec2 nhận dạng âm vị tiếng Việt** đảm nhiệm
+(`services/kiem_am/`, phần Rust ở `native/vieneu/src/kiem_am.rs`); phép đếm năng lượng/đỉnh
+sóng cũ **đã gỡ hẳn**, đừng dựng lại. Chi tiết đầy đủ ở `kiem-am-wav2vec2.md`, đây chỉ giữ
+những chỗ dễ sai:
+
+- **Ngưỡng đạt là 100–110% số âm dự kiến**, cho mọi câu — không còn dải ±15% và không còn
+  ngoại lệ ±1 âm ở câu ngắn. Thiếu một âm cũng là trượt.
+- **Giải CTC phải gộp mã lặp TRƯỚC khi bỏ blank.** `a, blank, a` là hai âm; làm ngược lại
+  thì thành một và mọi con số tự sai.
+- **Đoạn dài cắt cửa sổ thì ghép mã từng KHUNG rồi mới giải CTC một lần**, đừng giải từng
+  cửa sổ rồi cộng danh sách âm lại — âm vắt qua biên bị đếm đôi.
+- **Chỉ hai VieNeu cần khôi phục cao độ** trước khi nhận dạng, vì chỉ chúng đổi tốc độ
+  bằng lấy mẫu lại; Matcha/Piper/hệ thống đổi thời lượng ngay trong mô hình, áp thêm phép
+  khôi phục là làm hỏng. `TtsManager.kiemDoan` giữ chỗ rẽ này — đừng đoán lại ở nơi khác.
+- **Thiếu mô hình, thư viện cũ chưa có cổng `kiem_am_*`, hay WAV hỏng đều là «chưa kiểm»**,
+  không phải «trượt»: vẫn phát/xuất bình thường và **không** bắt TTS đọc lại, vì lỗi nằm ở
+  bộ kiểm chứ không ở bản đọc.
+- **Đổi bộ kiểm KHÔNG đụng `phienBanAm`.** Nó không làm âm thanh khác đi, nên tăng số ấy
+  chỉ là vứt cache của cả sách đã nghe.
+
+Mô hình tải riêng ~122 MB tại *Cài đặt → Kiểm âm*, ghim revision và xác minh SHA-256 trước
+khi đánh dấu hoàn tất (`kho_wav2vec2.dart`); file tải dở luôn mang đuôi `.part` và không bao
+giờ được coi là đã cài. Nó đi qua kho `sach-luoi-models` như các mô hình giọng, **không** tải
+thẳng từ HuggingFace — cùng lý do đã ghi ở mục Matcha.
 
 #### Đếm âm phía văn bản KHÔNG phải là đếm từ
 
@@ -609,20 +642,23 @@ không có chỗ nào tham chiếu tường minh để trình liên kết giữ 
 danh sách và **không được bỏ**: bản Profile dựng `Runner.debug.dylib` rồi `dlsym("main")`
 trong đó.
 
-**Upstream thêm engine mới là phải xem lại file ấy.** Danh sách lọc theo TIỀN TỐ, mà engine
-mới hay mang tiền tố mới: Matcha (1.7.0) dùng `matcha_` chứ không phải `vieneu_`. Thiếu một
-dòng thì bản Release strip sạch sáu hàm của nó — app vẫn cài được, mục engine vẫn hiện
-trong Cài đặt, chỉ tới lúc nạp engine mới vỡ. Và bản Debug **không** dùng danh sách này nên
+**Upstream thêm cổng FFI mới là phải xem lại file ấy** — không chỉ engine. Danh sách lọc
+theo TIỀN TỐ, mà cổng mới hay mang tiền tố mới: Matcha (1.7.0) dùng `matcha_` chứ không
+phải `vieneu_`, và bộ kiểm âm wav2vec2 (1.7.2) lại mang `kiem_am_` dù nó không phải engine
+nào cả. Thiếu một dòng thì bản Release strip sạch các hàm ấy — app vẫn cài được, mục ấy vẫn
+hiện trong Cài đặt, chỉ tới lúc nạp mới vỡ. Và bản Debug **không** dùng danh sách này nên
 chạy thử bằng Debug không lộ ra gì; phải thử đúng bản Release. Soi nhanh:
 
 ```bash
-nm -gU app/build/ios/iphoneos/Runner.app/Runner | grep -c "_matcha_"
+nm -gU app/build/ios/iphoneos/Runner.app/Runner | grep -c "_kiem_am_"
 ```
 
-Cùng lúc ấy, kiểm cả hai chỗ mở thư viện của engine mới — một để chạy, một cho lệnh huỷ khi
-tua. Cả hai phải đi qua `openNativeLibrary()`; upstream viết cho Windows/Android nên mặc
-định gọi thẳng `DynamicLibrary.open`, và đã dẫm đúng chỗ này ở cả v2 (1.6.1) lẫn Matcha
-(1.7.0).
+Cùng lúc ấy, kiểm **mọi** chỗ mở thư viện của phần mới — engine có hai (một để chạy, một cho
+lệnh huỷ khi tua), bộ kiểm âm có một nằm trong hàm chạy ở isolate nền. Tất cả phải đi qua
+`openNativeLibrary()`; upstream viết cho Windows/Android nên mặc định gọi thẳng
+`DynamicLibrary.open`, và đã dẫm đúng chỗ này **ba lần liên tiếp**: v2 (1.6.1), Matcha
+(1.7.0), wav2vec2 (1.7.2). Cứ coi như lần sau cũng thế mà đi soi
+`grep -rn 'DynamicLibrary.open' app/lib/` sau mỗi lần trộn.
 
 TTS hệ thống trên **cả macOS lẫn iOS** đi đường riêng qua `app/apple/GiongHeThong.swift`
 chứ không qua `flutter_tts` — cờ `_quaKenhRieng` trong `system_tts_engine.dart`. File Swift
