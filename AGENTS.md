@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 `AGENTS.md` ở cùng thư mục là **bản sao của file này cho Codex** — nội dung giống hệt, chỉ
 đổi ba chỗ xưng tên. Sửa file này xong thì dựng lại nó, đừng sửa tay hai bản:
@@ -726,7 +726,7 @@ nó. Thân hàm phải là **câu lệnh**, không phải biểu thức:
 .whenComplete(() => _inflight.remove(key));     // treo
 ```
 
-Đã ghi cảnh báo sẵn trong `tts_manager.dart` mà vẫn có người (Claude) dẫm lại khi viết test.
+Đã ghi cảnh báo sẵn trong `tts_manager.dart` mà vẫn có người (Codex) dẫm lại khi viết test.
 
 **Đo hiệu năng thì phải đóng ứng dụng trước.** Bản Windows đang chạy nền chiếm CPU đủ để
 làm lệch số tới 40% — có lần đo ra 2 worker *chậm hơn* 1 worker, đóng app đi thì số về đúng.
