@@ -3,12 +3,14 @@
 # mà Dart tra các hàm này bằng dlsym qua DynamicLibrary.process(), không có chỗ
 # nào gọi thẳng để mà giữ.
 # Thêm tiền tố mới ở đây mỗi khi upstream thêm một cổng FFI: engine Matcha
-# (1.7.0) dùng tiền tố `matcha_` chứ không phải `vieneu_`, và thiếu dòng ấy thì
-# bản Release strip sạch sáu hàm của nó — app vẫn cài được, mục Matcha vẫn hiện
-# trong Cài đặt, chỉ tới lúc nạp engine mới vỡ. Bản Debug thì KHÔNG dùng danh
-# sách này (xem dưới) nên chạy thử bằng Debug không lộ ra gì.
+# (1.7.0) dùng tiền tố `matcha_` và bộ kiểm âm wav2vec2 (1.7.2) dùng `kiem_am_`,
+# chứ không phải `vieneu_`. Thiếu dòng ấy thì bản Release strip sạch mấy hàm của
+# nó — app vẫn cài được, mục ấy vẫn hiện trong Cài đặt, chỉ tới lúc nạp mới vỡ.
+# Bản Debug thì KHÔNG dùng danh sách này (xem dưới) nên chạy thử bằng Debug
+# không lộ ra gì.
 _vieneu_*
 _matcha_*
+_kiem_am_*
 _sea_g2p_*
 _sachnoi_*
 

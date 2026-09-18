@@ -302,8 +302,9 @@ Ba chỗ dễ sai nhất, đều đã đo:
   hẳn file ấy — các đoạn độc lập, đọc trước song song được.
 - **`docLaiRaKhac` là `false`.** Đổi hạt giống chỉ đổi nhiễu khởi tạo của bộ giải ODE; độ
   dài đoạn do bộ đoán độ dài quyết định và nó tất định. Đo năm hạt giống trên cùng một câu:
-  thời lượng giống hệt nhau tới từng mẫu (6,478 s). Nghĩa là `core/kiem_am.dart` đếm ra
-  đúng chừng ấy nhân âm ở mọi lần đọc lại — bật cờ lên là đọc lại năm lần rồi hỏng y hệt.
+  thời lượng giống hệt nhau tới từng mẫu (6,478 s). Nghĩa là bộ kiểm âm đếm ra đúng chừng ấy
+  âm ở mọi lần đọc lại — bật cờ lên là đọc lại năm lần rồi hỏng y hệt. Vì thế Matcha (cùng
+  Piper và TTS hệ thống) vẫn được kiểm âm nhưng không bao giờ đọc lại.
 - **Tốc độ đi vào mô hình, không phải vào phép lấy mẫu lại.** `length_scale = 1/tốc độ`
   nên xuất file ở 1,25× thì cao độ giữ nguyên, khác hai engine kia. Đo được đúng tuyến
   tính: 0,8× ra 5,178 s, 1,0× ra 6,478 s, 1,25× ra 8,104 s.
@@ -438,8 +439,15 @@ file chứ không nằm trong âm thanh đã tổng hợp.
 
 `export_service.dart`: job dừng và chạy tiếp được kể cả sau khi tắt ứng dụng — trạng thái ở
 `job.json`, phần đang ghi dở ở file `.part`, âm thanh từng đoạn ở cache. Sau mỗi đoạn,
-`core/kiem_am.dart` đếm số nhân âm nghe được rồi so với số âm tiết mà văn bản đáng lẽ đọc
-ra; lệch quá thì đọc lại bằng hạt giống khác, tối đa 5 lần, cuối cùng lấy bản gần đúng nhất.
+`services/kiem_am/` nhận dạng âm vị bằng wav2vec2 rồi `core/kiem_am.dart` so số âm nghe
+được với số âm tiết mà văn bản đáng lẽ đọc ra; ra ngoài dải **100–110%** thì đọc lại bằng
+hạt giống khác, tối đa 5 lần, cuối cùng lấy bản gần đúng nhất.
+
+Từ 1.7.2 phép đếm phía âm thanh **không còn tìm đỉnh sóng** — nó chạy mô hình
+wav2vec2-vi-phone (ONNX, 122 MB, tải riêng ở Cài đặt) trong một isolate qua cổng FFI
+`kiem_am_*`. Chưa tải mô hình, DLL cũ không có cổng ấy, hay WAV lỗi đều thành **chưa kiểm**:
+vẫn phát/xuất được nhưng không tính là đạt và không bắt đọc lại. Chi tiết ở
+`kiem-am-wav2vec2.md`.
 
 #### Đếm âm phía văn bản KHÔNG phải là đếm từ
 
@@ -453,7 +461,7 @@ ngoài thì hụt nặng, mà hụt bao nhiêu không đoán được:
 | `Ngôi nhà RIDDLE.` | 3 | 8 |
 | `Cắm USB vào máy tính rồi bật lên.` | 8 | 10 |
 
-Lệch trung bình **24,3%** trên bộ câu đo — vượt xa dải ±15%, nên đoạn đọc hoàn toàn đúng
+Lệch trung bình **24,3%** trên bộ câu đo — vượt xa dải cho phép, nên đoạn đọc hoàn toàn đúng
 vẫn bị bắt đọc lại năm lần, và lần nào cũng trượt y hệt vì lỗi nằm ở phép đếm chứ không ở
 bản đọc. Sửa xong còn **1,5%**.
 
@@ -609,20 +617,22 @@ không có chỗ nào tham chiếu tường minh để trình liên kết giữ 
 danh sách và **không được bỏ**: bản Profile dựng `Runner.debug.dylib` rồi `dlsym("main")`
 trong đó.
 
-**Upstream thêm engine mới là phải xem lại file ấy.** Danh sách lọc theo TIỀN TỐ, mà engine
-mới hay mang tiền tố mới: Matcha (1.7.0) dùng `matcha_` chứ không phải `vieneu_`. Thiếu một
-dòng thì bản Release strip sạch sáu hàm của nó — app vẫn cài được, mục engine vẫn hiện
-trong Cài đặt, chỉ tới lúc nạp engine mới vỡ. Và bản Debug **không** dùng danh sách này nên
-chạy thử bằng Debug không lộ ra gì; phải thử đúng bản Release. Soi nhanh:
+**Upstream thêm cổng FFI mới là phải xem lại file ấy** — không chỉ engine. Danh sách lọc
+theo TIỀN TỐ, mà mã mới hay mang tiền tố mới: Matcha (1.7.0) dùng `matcha_`, còn bộ kiểm âm
+wav2vec2 (1.7.2) dùng `kiem_am_` — cả hai đều không phải `vieneu_`. Thiếu một dòng thì bản
+Release strip sạch mấy hàm ấy — app vẫn cài được, mục ấy vẫn hiện trong Cài đặt, chỉ tới lúc
+nạp mới vỡ. Và bản Debug **không** dùng danh sách này nên chạy thử bằng Debug không lộ ra
+gì; phải thử đúng bản Release. Soi nhanh:
 
 ```bash
-nm -gU app/build/ios/iphoneos/Runner.app/Runner | grep -c "_matcha_"
+nm -gU app/build/ios/iphoneos/Runner.app/Runner | grep -c "_kiem_am_"
 ```
 
-Cùng lúc ấy, kiểm cả hai chỗ mở thư viện của engine mới — một để chạy, một cho lệnh huỷ khi
-tua. Cả hai phải đi qua `openNativeLibrary()`; upstream viết cho Windows/Android nên mặc
-định gọi thẳng `DynamicLibrary.open`, và đã dẫm đúng chỗ này ở cả v2 (1.6.1) lẫn Matcha
-(1.7.0).
+Cùng lúc ấy, kiểm mọi chỗ mở thư viện của phần mới — engine thì có hai (một để chạy, một cho
+lệnh huỷ khi tua), bộ kiểm âm thì một. Tất cả phải đi qua `openNativeLibrary()`; upstream
+viết cho Windows/Android nên mặc định gọi thẳng `DynamicLibrary.open`, và đã dẫm đúng chỗ
+này ở cả v2 (1.6.1), Matcha (1.7.0) lẫn wav2vec2 (1.7.2) — lần sau cùng thì isolate kiểm âm
+chết ngay lúc nạp, kéo theo mọi lượt soi âm lúc nghe và lúc xuất.
 
 TTS hệ thống trên **cả macOS lẫn iOS** đi đường riêng qua `app/apple/GiongHeThong.swift`
 chứ không qua `flutter_tts` — cờ `_quaKenhRieng` trong `system_tts_engine.dart`. File Swift

@@ -14,6 +14,8 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/wav.dart';
+import '../../core/kiem_am.dart';
+import '../kiem_am/bo_kiem_am.dart';
 import '../../models/settings.dart' show coEngineMatcha, coEngineV2;
 import '../storage.dart';
 import 'matcha_engine.dart';
@@ -37,8 +39,8 @@ class CachedAudio {
 class TtsManager {
   /// [themEngine] chỉ dùng trong kiểm thử: cắm thêm engine giả để soi những
   /// phần gọi engine mà không cần mô hình thật trên máy.
-  TtsManager({ModelStore? store, List<TtsEngine> themEngine = const []})
-      : modelStore = store ?? ModelStore() {
+  TtsManager({ModelStore? store, List<TtsEngine> themEngine = const [], BoKiemAm? boKiemAm})
+      : kiemAm = boKiemAm ?? BoKiemAm(), modelStore = store ?? ModelStore() {
     onDevice = OnDeviceVieNeuEngine(modelStore);
     vieneuV2 = VieNeuV2Engine(modelStore);
     matcha = MatchaEngine(modelStore);
@@ -60,6 +62,17 @@ class TtsManager {
   }
 
   final ModelStore modelStore;
+  final BoKiemAm kiemAm;
+
+  Future<KetQuaKiemAm> kiemDoan({required String loi, required File wav,
+      required String engineId, double tocDo = 1}) {
+    // Chỉ hai VieNeu đổi cao độ bằng lấy mẫu lại; Matcha/Piper/hệ thống đổi
+    // thời lượng ngay trong mô hình. Khôi phục sai sẽ làm wav2vec2 nghe sai.
+    final doiCaoDo = engineId == 'vieneu' || engineId == 'vieneu_v2';
+    return kiemAm.kiem(loi: loi, wav: wav,
+        nhipCaoDo: doiCaoDo && (tocDo - 1).abs() > 0.01 ? tocDo : 1);
+  }
+
   late final OnDeviceVieNeuEngine onDevice;
   late final VieNeuV2Engine vieneuV2;
   late final MatchaEngine matcha;
@@ -103,6 +116,8 @@ class TtsManager {
   /// Bản cũ nằm lại trong thư mục đệm nhưng không ai tra tới; phần dọn theo trần
   /// dung lượng sẽ xoá dần vì chúng không còn được chạm vào.
   static int phienBanAm(String engineId) => switch (engineId) {
+        // Đổi trọng số/tokenizer v3 lên revision 5f2a3e9; v2 giữ cache cũ.
+        'vieneu' => 2,
         'system' => 2,
         'matcha' => 2,
         _ => 1,
