@@ -3,6 +3,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../services/tab_native.dart';
+import '../services/tu_the_may_gap.dart';
 import 'app_scope.dart';
 import 'export_page.dart';
 import 'kinh.dart';
@@ -21,7 +23,11 @@ class HomeShell extends StatefulWidget {
 }
 
 class HomeShellState extends State<HomeShell> {
-  int _index = 0;
+  int _indexTuVe = 0;
+
+  /// Tab đang mở. Thanh native bật thì nó giữ trạng thái, không phải chỗ này.
+  int get _index => TabNative.chung.batDuoc ? TabNative.chung.chiSo : _indexTuVe;
+  set _index(int v) => _indexTuVe = v;
 
   /// Số tab, để lệnh chuyển tab của tay cầm biết đâu là mép.
   static const soTab = 4;
@@ -36,7 +42,15 @@ class HomeShellState extends State<HomeShell> {
   /// không bao giờ thấy HomeShell vì nó là con cháu, không phải tổ tiên.
   static HomeShellState? hienTai;
 
-  void goTo(int index) => setState(() => _index = index);
+  void goTo(int index) {
+    // Thanh native đang bật thì nó mới là nguồn sự thật: báo sang đó, rồi nó
+    // báo ngược lại qua listener. Tự setState ở đây là hai bên lệch nhau.
+    if (TabNative.chung.batDuoc) {
+      TabNative.chung.chon(index);
+    } else {
+      setState(() => _index = index);
+    }
+  }
 
   /// Sang tab bên cạnh. Tới mép thì dừng, không vòng lại: L1/R1 bấm liên tục mà
   /// vòng vèo thì người dùng mất dấu mình đang ở đâu.
@@ -46,10 +60,22 @@ class HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     hienTai = this;
+    TuTheMayGap.chung.addListener(_doiTuThe);
+    TabNative.chung.addListener(_doiTuThe);
+    // Phải đợi vẽ xong khung đầu tiên: lúc ấy scene mới nối và cửa sổ mới có
+    // rootViewController để Swift tráo sang UITabBarController.
+    WidgetsBinding.instance.addPostFrameCallback((_) => TabNative.chung.bat());
+  }
+
+  /// Gập/mở/xoay máy đổi cạnh đặt thanh điều khiển — vẽ lại cả khung.
+  void _doiTuThe() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    TuTheMayGap.chung.removeListener(_doiTuThe);
+    TabNative.chung.removeListener(_doiTuThe);
     if (hienTai == this) hienTai = null;
     super.dispose();
   }
@@ -58,8 +84,37 @@ class HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final hasBook = state.currentBook != null;
-    // Máy gập mở ra là đủ rộng để ăn bố cục như bản máy tính.
-    final wide = manHinhRong(context);
+
+    // Thanh điều khiển nằm dọc ở cạnh bên hay ngang ở đáy — và trên máy gập thì
+    // KHÔNG được tự suy ra từ bề ngang.
+    //
+    // Apple quy định: màn ngoài lúc gập thì thanh nằm dọc, màn trong lúc mở
+    // ngang cũng dọc, chỉ màn trong lúc dựng đứng mới giữ thanh ngang. Quy tắc
+    // ấy không suy ra được từ khổ màn — màn ngoài ~466×678 dp và màn trong dựng
+    // đứng ~626×890 dp có tỉ lệ gần như bằng nhau (1,455 với 1,422) mà kết luận
+    // trái ngược. Thứ phân biệt chúng là size class, nên phải hỏi hệ thống.
+    //
+    // Bản trước làm ngược ở HAI trong ba tư thế: ngưỡng 600 dp cho màn ngoài ra
+    // thanh đáy (phải là dọc) và cho màn trong dựng đứng ra thanh dọc (phải là
+    // đáy). Đó là chỗ người dùng nhìn ra ngay là "không giống app hệ thống".
+    final tuThe = TuTheMayGap.chung;
+    // Có vùng bản lề nghĩa là máy gập được — hỏi cả vùng chưa hoạt động nên cờ
+    // này đúng cả khi máy đang mở hẳn. Máy không gập thì danh sách rỗng và mọi
+    // thứ dưới đây rơi về đúng cách cũ.
+    final layMayGap = tuThe.vungChia.isNotEmpty;
+    final canhHeThong = tuThe.canhThanhDoc;
+
+    // Trên máy gập: theo hệ thống, tuyệt đối không xét bề ngang.
+    // Ngoài ra: giữ nguyên quy tắc cũ — rộng thì thanh dọc bên trái, như bản máy
+    // tính và màn trong của máy gập Android.
+    final wide = layMayGap ? canhHeThong != CanhThanhDoc.khong : manHinhRong(context);
+    // Cạnh nào thì theo hệ thống; ngoài máy gập thì vẫn bên trái như cũ.
+    //
+    // `sau` là cạnh sau theo chiều viết. Ứng dụng chỉ có tiếng Việt (viết
+    // trái-sang-phải) nên sau = phải; hướng dẫn còn nói thanh bám theo phần cứng
+    // nên không đổi bên trong ngôn ngữ phải-sang-trái — có thêm ngôn ngữ ấy thì
+    // phải quay lại đọc kỹ chỗ này.
+    final railBenPhai = canhHeThong == CanhThanhDoc.sau;
 
     final pages = [
       const LibraryPage(),
@@ -83,92 +138,147 @@ class HomeShellState extends State<HomeShell> {
        label: 'Cài đặt', sac: SacNut.nguyHiem),
     ];
 
+    // Bề ngang dải mà hệ thống dành cho thanh dọc ở cạnh ấy.
+    //
+    // Khi hệ thống xếp thanh dọc, nó tự chừa sẵn một dải ở cạnh đó và báo qua
+    // viewPadding — đồng hồ, sóng, pin của chính nó nằm trong dải ấy. Thanh
+    // điều hướng của ứng dụng phải nằm ĐÚNG trong dải đó, chạy tiếp xuống dưới
+    // mấy thứ kia, chứ không phải là một cái cột thứ hai nằm thụt vào bên cạnh.
+    // Hướng dẫn nói thẳng: "standard navigation and toolbar buttons now lay out
+    // vertically under the status bar".
+    // Thanh tab native đang bọc khung: nó mới là thanh điều hướng, Flutter
+    // không vẽ thanh nào nữa. UIKit đã trừ sẵn chỗ thanh chiếm ra khỏi safe
+    // area của view Flutter, nên chỉ cần đọc `padding` là đủ — không tự tính
+    // dải, không tự chừa lề, không đoán cạnh nào.
+    final dungTabNative = TabNative.chung.batDuoc;
+    final leHeThong = MediaQuery.viewPaddingOf(context);
+    // Thanh native tự đo chỗ nó chiếm rồi báo sang; cộng vào lề an toàn của máy.
+    final leMay = dungTabNative
+        ? EdgeInsets.fromLTRB(
+            leHeThong.left + TabNative.chung.leThanh.left,
+            leHeThong.top + TabNative.chung.leThanh.top,
+            leHeThong.right + TabNative.chung.leThanh.right,
+            leHeThong.bottom + TabNative.chung.leThanh.bottom,
+          )
+        : leHeThong;
+    final daiHeThong = railBenPhai ? leMay.right : leMay.left;
+    final coDaiRieng = wide && daiHeThong > 40;
+    // Chỉ còn vẽ thanh dọc của Flutter khi KHÔNG có thanh native.
+    final veRail = wide && !dungTabNative;
+
+    // Thanh dọc rộng cố định, nằm GIỮA dải mà hệ thống đã chừa sẵn.
+    const railRong = 64.0;
+    final railLe = coDaiRieng ? (daiHeThong - railRong) / 2 : 10.0;
+
+    // Chỗ nội dung phải tránh ở cạnh có thanh — chừa ĐỦ, không chừa một nửa.
+    //
+    // Bản trước cố chừa nửa để mép thẻ trôi qua sau tấm kính cho ra dáng kính.
+    // Sai ở chỗ: nội dung không bao giờ cuộn NGANG qua một thanh dọc, nên thứ
+    // duy nhất nằm dưới kính là chữ và ô chọn bị cắt cụt — đúng cái "náo loạn"
+    // nhìn thấy trên máy. Kính lấy chiều sâu từ nền chuyển sắc thay vào đó.
+    final chuaThanh = veRail ? (coDaiRieng ? daiHeThong : railRong + railLe * 2) : 0.0;
+
+    // Thanh phát thu nhỏ NỔI lên trên nội dung, không dính đáy màn nữa: dính
+    // đáy thì nó chạy thẳng vào góc bo và chui xuống dưới thanh dọc.
+    final coMini = state.currentBook != null && _index != 1;
+    const miniCao = 64.0;
+
+    // Lề đáy trang phải tự chừa, truyền xuống qua MediaQuery.padding để mục
+    // cuối của danh sách không bị thanh phát hay vạch cử chỉ che.
+    final leDuoi = (dungTabNative || wide ? leMay.bottom + 10 : 90 + leMay.bottom) +
+        (coMini ? miniCao + 10 : 0);
+
+    final leTrai = veRail && !railBenPhai ? chuaThanh : leMay.left;
+    final lePhai = veRail && railBenPhai ? chuaThanh : leMay.right;
+
     return Scaffold(
-      // Trên điện thoại, nội dung phải né thanh trạng thái và khu vực tai thỏ.
-      // Cạnh dưới để thanh điều hướng tự lo, nên không cắt ở đây.
-      body: SafeArea(
-        bottom: false,
+      // Nền do DecoratedBox lo, Scaffold để trong suốt cho khỏi vẽ chồng.
+      backgroundColor: Colors.transparent,
+      body: DecoratedBox(
+        decoration: BoxDecoration(gradient: nenUngDung(context)),
         child: Stack(
-        children: [
-          // Nội dung trải hết bề ngang rồi chừa lề cho thanh điều hướng nổi lên
-          // trên. Nhờ vậy mép các thẻ trôi qua sau tấm kính lúc cuộn — không thì
-          // sau kính chỉ là nền phẳng, nhìn hệt một mảng xám.
-          Padding(
-            // Chừa chỗ cho hai thanh điều hướng nổi. Bên trái là tấm kính dọc.
-            // Bên dưới: extendBody cho nội dung chạy xuyên qua sau thanh ngang,
-            // nhưng phần điều khiển ở đáy trang thì phải né ra, không thì bị
-            // thanh ấy đè lên — đúng lỗi đã gặp trên điện thoại.
-            //
-            // 80 là chiều cao NavigationBar của Material, 10 là lề tôi bọc thêm,
-            // còn viewPadding là vạch cử chỉ của máy (NavigationBar tự cộng
-            // phần này vào chiều cao của nó).
-            padding: EdgeInsets.only(
-              left: wide ? 92 : 0,
-              bottom: wide ? 0 : 90 + MediaQuery.viewPaddingOf(context).bottom,
-            ),
-            child: Column(
-              children: [
-                const _EngineBanner(),
-                _BusyBar(tabIndex: _index),
-                Expanded(child: pages[_index]),
-                if (state.currentBook != null && _index != 1) const MiniPlayer(),
-              ],
-            ),
-          ),
-          if (wide)
-            Positioned(
-              left: 8,
-              top: 8,
-              bottom: 8,
-              width: 76,
-              child: Kinh(
-                bo: 26,
-                child: NavigationRail(
-              selectedIndex: _index,
-              onDestinationSelected: goTo,
-              labelType: NavigationRailLabelType.all,
-              backgroundColor: Colors.transparent,
-              // Vòng tròn chuyển sắc đã là dấu hiệu "đang chọn" rồi; để thêm
-              // mảng nền của Material nữa thì thành hai lớp chỉ dấu chồng nhau.
-              indicatorColor: Colors.transparent,
-              // Nhưng hình dạng thì vẫn phải đổi: mảng sáng lúc rê chuột hay
-              // bấm giữ vẫn vẽ theo indicatorShape, mặc định là viên thuốc bầu
-              // dục — lệch hẳn với vòng tròn của mục đang chọn.
-              indicatorShape: const CircleBorder(),
-              // NavigationRail tự canh dọc mảng sáng ấy dựa vào iconTheme.size
-              // — không khai thì nó đoán icon cao 24px (mặc định Material) và
-              // không bù gì cả, trong khi icon thật của mình cao 40px (khung
-              // SizedBox 40 phía dưới) nên mảng sáng bị lệch lên trên, không
-              // nằm giữa icon. Khai đúng 40 thì NavigationRail tự bù lại.
-              unselectedIconTheme: const IconThemeData(size: 40),
-              selectedIconTheme: const IconThemeData(size: 40),
-              destinations: [
-                for (final d in destinations)
-                  NavigationRailDestination(
-                    // Hai trạng thái phải chiếm đúng một khung: mục đang chọn
-                    // đeo vòng tròn 40px, mục thường chỉ có biểu tượng 24px —
-                    // để nguyên thì chọn sang mục khác là cả cột xô lên xuống.
-                    // size: 24 khai rõ, không để hưởng theo unselectedIconTheme
-                    // vừa đặt ở trên (40) — cỡ đó chỉ để NavigationRail tính
-                    // đúng vị trí mảng sáng, không phải cỡ icon thật vẽ ra.
-                    icon: SizedBox.square(
-                      dimension: 40,
-                      child: Center(child: Icon(d.icon, size: 24)),
+          children: [
+            Padding(
+              padding: EdgeInsets.only(top: leMay.top, left: leTrai, right: lePhai),
+              child: Column(
+                children: [
+                  const _EngineBanner(),
+                  _BusyBar(tabIndex: _index),
+                  Expanded(
+                    child: MediaQuery(
+                      data: MediaQuery.of(context)
+                          .copyWith(padding: EdgeInsets.only(bottom: leDuoi)),
+                      child: pages[_index],
                     ),
-                    selectedIcon: HinhTronSac(hinh: d.selected, sac: d.sac),
-                    padding: const EdgeInsets.symmetric(vertical: 7),
-                    label: Text(d.label),
                   ),
-              ],
-                ),
+                ],
               ),
             ),
-        ],
+            if (veRail)
+              Positioned(
+                // Khoá theo cạnh: đổi bên thì dựng view native MỚI thay vì đem
+                // view cũ sang chỗ khác, kẻo lớp hợp ảnh cũ đọng lại thành bóng.
+                key: ValueKey(railBenPhai),
+                left: railBenPhai ? null : railLe,
+                right: railBenPhai ? railLe : null,
+                // Ngay dưới camera và đảo động, để bốn icon chạy tiếp xuống
+                // thành một cột liền với đồng hồ.
+                top: tuThe.cheTrenThanhDoc + 10,
+                // Hở đáy cho vạch cử chỉ và cho góc bo nặng của màn.
+                bottom: leMay.bottom + 14,
+                width: railRong,
+                child: Kinh(
+                  // Bo bằng nửa bề ngang: hai đầu tròn hẳn, bám theo độ cong
+                  // của phần cứng như hướng dẫn Liquid Glass đòi.
+                  bo: railRong / 2,
+                  child: NavigationRail(
+                    // Dồn lên TRÊN. Mặc định canh giữa thì bốn icon rơi xuống
+                    // lưng chừng, rời hẳn cụm đồng hồ ở đầu dải.
+                    groupAlignment: -1.0,
+                    selectedIndex: _index,
+                    onDestinationSelected: goTo,
+                    // Không nhãn chữ: hướng dẫn nói thanh dọc dùng icon, item có
+                    // chữ thì hệ thống còn không xếp dọc được.
+                    labelType: NavigationRailLabelType.none,
+                    backgroundColor: Colors.transparent,
+                    indicatorColor: Colors.white.withValues(alpha: 0.22),
+                    indicatorShape: const CircleBorder(),
+                    unselectedIconTheme:
+                        IconThemeData(size: 25, color: Colors.white.withValues(alpha: 0.6)),
+                    selectedIconTheme: const IconThemeData(size: 25, color: Colors.white),
+                    destinations: [
+                      for (final d in destinations)
+                        NavigationRailDestination(
+                          icon: SizedBox.square(
+                            dimension: 46,
+                            child: Center(child: Icon(d.icon)),
+                          ),
+                          selectedIcon: SizedBox.square(
+                            dimension: 46,
+                            child: Center(child: Icon(d.selected)),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          // Vẫn phải có nhãn cho VoiceOver dù không vẽ ra.
+                          label: Text(d.label),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            if (coMini)
+              Positioned(
+                left: leTrai + 14,
+                right: lePhai + 14,
+                bottom: leMay.bottom + 10,
+                height: miniCao,
+                child: const MiniPlayer(),
+              ),
+          ],
         ),
       ),
       // Thanh dưới đáy cũng là kính nổi: nội dung cuộn qua phía sau nó.
       extendBody: true,
-      bottomNavigationBar: wide
+      bottomNavigationBar: wide || dungTabNative
           ? null
           : Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),

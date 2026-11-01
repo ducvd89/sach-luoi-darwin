@@ -116,6 +116,17 @@ Cần `brew install cmake` — engine v2 kéo `llama-cpp-sys-2`, và nó dựng 
 cmake. Trên máy Mac thì không phải chỉ đường gì thêm cho Android/iOS: cmake của Homebrew
 biết biên dịch chéo sang iOS, chỉ mức iOS tối thiểu là phải tự đặt (xem Cạm bẫy).
 
+**`ios/Podfile` phải khai `platform :ios, '15.1'`.** Dòng ấy vốn bị chú thích sẵn trong bản
+mẫu của Flutter, nên CocoaPods lấy mặc định 13.0 — mà từ Xcode 26 mức thấp nhất còn dựng
+được là 15.0. Bản dựng chết ở `Target Integrity … is set to 13.0, but the range of supported
+deployment target versions is 15.0 to 27.1.x`, và nó trỏ vào `Pods.xcodeproj` chứ không vào
+gói nào, nên rất khó lần ra là do một dòng trong Podfile. Khai `platform` chỉ đặt mức cho
+project Pods; gói nào tự khai mức thấp hơn trong podspec thì vẫn giữ mức ấy, nên `post_install`
+ép lại từng target. Sửa Podfile xong phải `pod install` lại — và `pod` cần locale UTF-8
+(`LANG=en_US.UTF-8`), không thì nó chết với `Unicode Normalization not appropriate for
+ASCII-8BIT` ngay trước khi đọc tới Podfile. Gọi qua `flutter build` thì không dính, vì
+Flutter tự đặt biến ấy.
+
 **Hai file `.a` của iOS KHÔNG nằm trong repo** (đã cho vào `.gitignore` từ 1.7.1a) — chúng
 là sản phẩm dựng, mỗi file 74 MB và đổi theo mọi lần build, mà trần cứng của GitHub là
 100 MB một file. Nên clone về là phải chạy script trước, không thì Xcode báo thiếu symbol
@@ -674,6 +685,158 @@ là nhân tỉ lệ hai lần rồi đọc chậm còn một phần tư. Ghi ch�
 
 Tay cầm chơi game chưa có đường nào cho Apple: `_nguonCuaMay()` trả null nên `hoTro` là
 false và không có gì hỏng, chỉ là không dùng được. Khung GameController làm được việc này.
+
+### iPhone Duo — máy gập, và vì sao KHÔNG được đoán theo bề ngang
+
+Apple quy định thanh điều hướng/công cụ/tab nằm **dọc ở cạnh bên** trên màn ngoài lúc gập,
+và trên màn trong lúc **mở ngang**; chỉ màn trong lúc **dựng đứng** mới giữ thanh ngang.
+
+Quy tắc ấy **không suy ra được từ khổ màn**, và đây là chỗ bản 1.8.0a làm sai ở hai trong ba
+tư thế. Màn ngoài ~466×678 dp (tỉ lệ 1,455) phải thanh dọc; màn trong dựng đứng ~626×890 dp
+(tỉ lệ 1,422) phải thanh ngang — hai tỉ lệ gần như bằng nhau mà kết luận trái ngược. Thứ
+phân biệt chúng là **size class** (ngoài: compact, trong: regular), mà Flutter không lấy
+được. Nên phải hỏi hệ thống:
+
+| Hỏi gì | API | Qua đâu |
+|---|---|---|
+| Cạnh đặt thanh dọc | `UITraitCollection.verticalBarEdge` (iOS 27.1) | `ios/Runner/TuTheMayGap.swift` |
+| Khe bản lề, vùng camera che | `UIView.reservedRegions(kind:options:)` | cùng file |
+
+Phía Dart là `lib/services/tu_the_may_gap.dart`. Nền tảng khác không trả lời kênh ấy, cờ về
+mặc định và mọi chỗ rơi về đúng quy tắc theo bề ngang như cũ — đó là điều kiện để sửa phần
+này mà không phải thử lại bốn nền tảng.
+
+Ba chỗ đang dùng, và lý do:
+
+- `home_shell.dart` — chọn thanh dọc/ngang theo hệ thống, và **chừa chỗ cho camera** ở đầu
+  thanh dọc. Camera là *reserved region*, hướng dẫn tách hẳn nó khỏi safe area nên
+  `SafeArea` không lo hộ; không chừa thì mục đầu tiên nằm ngay dưới ống kính.
+- `player_page.dart` — cột chương chặn ở **một phần ba** bề ngang và lùi trước khe bản lề.
+  Số 280 dp cố định cũ làm cột chương chiếm gần hai phần ba trang bên trái lúc gập hờ, vì
+  bản lề cắt màn trong thành hai vùng mỗi vùng chỉ ~430 dp.
+- `library_page.dart` — máy gập thì ưu tiên số cột **chẵn**, để khe gập rơi đúng vào rãnh
+  giữa hai cột thay vì cắt qua một cột.
+
+Chữ đang đọc thì né khe bằng `ui/ne_ban_le.dart`. Nó phải **đo vị trí thật** của chính nó
+(`localToGlobal` trong `addPostFrameCallback`) vì khung bản lề hệ thống trả về nằm trong toạ
+độ của cả view Flutter, còn widget thì nằm sau thanh dọc, sau cột chương, sau mọi lớp lề —
+so thẳng hai con số là sai. Nhớ so lề mới với lề cũ trước khi `setState`, không thì
+đo-vẽ-đo thành vòng lặp vô tận.
+
+Kiểm bằng `app/test/giao_dien_may_gap_test.dart`: nó giả lập đúng thứ Swift gửi sang rồi soi
+phần suy luận. Cạm bẫy trong chính bài test: phải **chạm vào singleton trước khi gửi** tin
+nhắn giả, vì handler của kênh chỉ đăng ký trong hàm dựng mà hàm dựng thì chạy ở lần truy
+cập đầu tiên — thiếu thì tin nhắn rơi vào hư không và bài đầu tiên trượt.
+
+Tạo máy ảo để thử ba tư thế (cần runtime iOS 27.2, Xcode 27.1 đã có sẵn kiểu máy):
+
+```bash
+xcrun simctl create "iPhone Duo" com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4
+```
+
+### Liquid Glass: Flutter không bao giờ được cấp
+
+Vật liệu Liquid Glass do **hệ thống** vẽ, và Apple chỉ cấp nó cho thành phần chuẩn của
+UIKit/SwiftUI. Sách lười vẽ mọi pixel bằng widget Flutter nên không nhận được gì — widget
+`Kinh` trong `ui/kinh.dart` chỉ là bản mô phỏng bằng `BackdropFilter`.
+
+Đường thật là `UIGlassEffect` (iOS 26+) trong một `UIVisualEffectView`, nhúng xuống dưới nội
+dung Flutter qua platform view: `ios/Runner/KinhNative.swift` + `lib/ui/kinh_native.dart`.
+`Kinh` tự lấy đường ấy trên iOS, nên mọi chỗ gọi sẵn có được kính thật mà không phải sửa.
+
+Ba giới hạn, biết trước để không mất thời gian tìm:
+
+- Kính chỉ khúc xạ phần **Flutter vẽ phía sau chính platform view ấy**, không phải cả màn.
+- Hai mảng cạnh nhau **không hoà vào nhau**. Hoà cần `UIGlassContainerEffect` làm cha chung,
+  mà qua platform view thì mỗi mảng là một view riêng không có cha chung. Muốn hoà thì gom
+  cả nhóm vào MỘT platform view.
+- Mỗi mảng là một lớp hợp ảnh riêng bên native. Đừng rải vào danh sách cuộn hay vào thứ chạy
+  theo ngón tay — con trượt của `fast_scrollbar.dart` cố ý truyền `thatKinh: false` vì nó
+  chạy từng khung hình, mà nó còn cần `dam` đổi theo trạng thái kéo, núm mà kính hệ thống
+  không có.
+
+Tên API của hai mục trên **đừng đoán**: cả hai đều `NS_REFINED_FOR_SWIFT` nên tên bên Swift
+khác tên trong header. Đọc thẳng header trong SDK rồi cho trình biên dịch xác nhận:
+
+```bash
+grep -rn "verticalBarEdge" "$(xcrun --sdk iphoneos --show-sdk-path)/System/Library/Frameworks/UIKit.framework/Headers"
+```
+
+```bash
+xcrun swiftc -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" -target arm64-apple-ios27.1 -typecheck thu.swift
+```
+
+Đã dẫm hai lần khi viết phần này: `UIView.ReservedRegion` bên Swift **không có**
+`identifier` dù header khai, và `UIGlassEffect.interactive` bên Swift là `isInteractive`.
+
+## Bản iOS viết thuần Swift (`ios-native/`)
+
+Từ 2.0.0a repo có HAI bản cho iOS. Bản Flutter trong `app/` vẫn là bản chính cho
+Windows, Android và macOS; `ios-native/` là app SwiftUI riêng, chỉ cho iPhone.
+
+**Vì sao tách ra.** Hệ thống chỉ cấp thanh điều hướng dọc của iPhone Duo, Liquid Glass, cụm
+capsule và menu tràn cho **thành phần chuẩn của UIKit/SwiftUI**. Flutter vẽ mọi pixel bằng
+widget của nó nên không nhận được gì, và mọi thứ phải bắt chước bằng tay — đã thử và trượt
+nhiều vòng (xem mục iPhone Duo ở trên). Bản native dùng `TabView` chuẩn thì **không có dòng
+nào trong mã nói tới máy gập**, hệ thống lo hết. Đó là tiêu chí để biết làm đúng.
+
+**Phần đắt nhất KHÔNG viết lại.** Engine đọc, sea-g2p và bộ mã hoá âm thanh đã là Rust sau
+một cổng C, nên Swift gọi thẳng đúng thư viện mà Dart vẫn gọi (`sachnoi_vieneu.xcframework`,
+vẫn dựng bằng `./dung-native-apple.sh ios`). Thứ phải chuyển là tầng `core/` bằng Dart.
+
+```bash
+cd ios-native && xcodegen generate     # project sinh từ project.yml, KHÔNG sửa tay
+xcodebuild -project SachLuoi.xcodeproj -scheme SachLuoi -configuration Release \
+  -destination 'generic/platform=iOS' -derivedDataPath build build
+```
+
+`.xcodeproj` và hai thư mục dựng đã vào `.gitignore` — clone về phải `xcodegen generate`
+trước. `sea_g2p.bin` và `giong.json` nhúng thẳng từ `app/assets/`, **dùng chung file** chứ
+không chép sang: từ điển 50 MB mà có hai bản thì chắc chắn sẽ lệch.
+
+### Cạm bẫy của bản native
+
+**Bản máy ảo phải loại `x86_64`.** Thư viện Rust chỉ dựng lát arm64 cho simulator, nên thiếu
+`EXCLUDED_ARCHS[sdk=iphonesimulator*]` thì bản máy ảo chết ở bước liên kết với một đống
+"Undefined symbols for architecture x86_64". Bản cho máy thật không dính.
+
+**`nm` của Xcode KHÔNG đọc được file `.a`.** Nó báo `Unknown attribute kind (105)` vì Rust
+dựng bằng LTO bitcode. Symbol vẫn ở đó và liên kết vẫn chạy — đừng tưởng thiếu symbol rồi đi
+dựng lại thư viện.
+
+**Bung ZIP phải ghi thẳng ra đĩa.** Gói v2 có hai file ~190 MB và ~298 MB sau khi bung; cấp
+phát nguyên khối trong RAM thì iOS giết app, mà nhìn ra ngoài chỉ thấy "v2 không tải được".
+`Zip.ruotRaDia` đẩy từng mẩu 1 MB qua `compression_stream` nên bộ nhớ có trần cố định.
+
+**Nghe nền cần `UIBackgroundModes: audio` trong Info.plist.** Đặt đúng `AVAudioSession`
+category `.playback` là CHƯA đủ — thiếu khai báo thì iOS cắt tiếng ngay lúc app rời tiền
+cảnh, không báo gì.
+
+**Đoạn rỗng làm chết cả chương.** Đoạn chỉ có dấu câu hay ký tự vô hình thì g2p không ra âm
+vị nào, engine trả lỗi, và nếu trình phát coi mọi lỗi là "hết chương" thì nó nghỉ luôn giữa
+chừng. Chắn ở cả hai đầu: `CatDoan` lọc từ lúc cắt, `TrinhPhat` gặp thì bỏ qua rồi đọc tiếp.
+
+**Dọn sách: đừng đuổi từng loại boilerplate.** Đo trên ba cuốn thật thì bỏ được tên chương
+lại lòi ra tên sách, rồi tên tác giả, rồi chữ ký trang web. `DonSach.boDongChay` đổi cách:
+thứ gì mở đầu **hơn nửa số chương** thì chính nó là dòng chạy, bất kể nội dung. Một ngưỡng,
+hết cả bốn loại.
+
+**Split view phải để ngăn nội dung TRỐNG khi chưa chọn.** Lùi về chương đầu thì lúc gộp lại
+(màn ngoài) split view hiện thẳng phần đọc và đẩy danh sách chương ra sau cử chỉ vuốt mép.
+Mail làm ngược lại: gập lại thấy danh sách trước. Chỉ chọn sẵn khi size class là `regular`.
+
+**Xem được giao diện mà không cần chạm.** `simctl` chụp màn hình thẳng từ dòng lệnh, nên
+`KhungChinh` đọc biến môi trường `TAB` để mở sẵn từng tab:
+
+```bash
+xcrun simctl launch --terminate-running-process <udid> app.carrot4127.ursaminor5536
+xcrun simctl io <udid> screenshot ra.png      # kèm SIMCTL_CHILD_TAB=0..3
+```
+
+### Còn dở ở 2.0.0a
+
+Chọn engine trong Cài đặt mới đổi chữ, chưa đổi engine thật (luôn dùng v3). Kiểm âm mới tải
+được chứ chưa chạy. Xuất file chưa làm. Nhân bản giọng chưa có.
 
 ### Tay cầm chơi game
 

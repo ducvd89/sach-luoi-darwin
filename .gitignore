@@ -50,3 +50,16 @@ Thumbs.db
 
 # Cai dat rieng cua may nay
 .claude/settings.local.json
+
+# Bản iOS viết thuần Swift (ios-native/).
+#
+# Thư mục dựng: 300–400 MB mỗi cái, sinh lại được hoàn toàn.
+ios-native/build/
+ios-native/buildsim/
+
+# File .xcodeproj do xcodegen SINH RA từ project.yml, không phải file nguồn.
+#
+# Giữ trong repo là có hai bản mô tả cùng một project rồi sớm muộn chúng lệch
+# nhau — mà bản sinh ra thì dài hàng nghìn dòng, xung đột merge không đọc nổi.
+# Clone về chạy `cd ios-native && xcodegen generate` là có lại.
+ios-native/SachLuoi.xcodeproj/

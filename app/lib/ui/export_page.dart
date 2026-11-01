@@ -111,7 +111,10 @@ class _ExportPageState extends State<ExportPage> {
       controller: _cuon,
       child: ListView(
       controller: _cuon,
-      padding: const EdgeInsets.fromLTRB(22, 20, 22, 26),
+      // Cộng lề mà khung ngoài truyền xuống (thanh tab native, thanh phát nổi,
+      // vạch cử chỉ). Không cộng thì mục cuối nằm khuất dưới thanh.
+      padding: const EdgeInsets.fromLTRB(22, 20, 22, 26)
+          .add(MediaQuery.paddingOf(context)) as EdgeInsets,
       children: [
         Text('Xuất ra file âm thanh', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 10),

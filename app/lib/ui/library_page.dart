@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../models/book.dart';
 import '../models/work_progress.dart';
+import '../services/tu_the_may_gap.dart';
 import 'app_scope.dart';
 import 'cuon_tay_cam.dart';
 import 'home_shell.dart';
@@ -75,7 +76,10 @@ class _LibraryPageState extends State<LibraryPage> {
       controller: _cuon,
       child: ListView(
       controller: _cuon,
-      padding: const EdgeInsets.fromLTRB(22, 20, 22, 26),
+      // Cộng lề mà khung ngoài truyền xuống (thanh tab native, thanh phát nổi,
+      // vạch cử chỉ). Không cộng thì mục cuối nằm khuất dưới thanh.
+      padding: const EdgeInsets.fromLTRB(22, 20, 22, 26)
+          .add(MediaQuery.paddingOf(context)) as EdgeInsets,
       children: [
         Row(
           children: [
@@ -128,7 +132,32 @@ class _LibraryPageState extends State<LibraryPage> {
         else
           LayoutBuilder(
             builder: (context, constraints) {
-              final columns = (constraints.maxWidth / 330).floor().clamp(1, 4);
+              // LÀM TRÒN, không cắt xuống. 330 là bề ngang vừa mắt cho một thẻ,
+              // nhưng `floor` biến nó thành bề ngang TỐI THIỂU: chỗ rộng 490 dp
+              // ra đúng một thẻ 490 dp bè ngang, cao 234 — một dải ngang chứ
+              // không còn là cái thẻ, và cả màn chỉ thấy hai cuốn.
+              //
+              // Đó đúng là chỗ mặt trong iPhone Duo rơi vào: 626 dp trừ 92 cho
+              // thanh điều hướng dọc và 44 cho lề trang còn 490. Mở máy ra để
+              // được màn 7,6 inch mà vẫn xem sách một cột thì mở làm gì.
+              //
+              // Làm tròn thì 490 ra hai cột (245 mỗi thẻ) còn các mức cũ giữ
+              // nguyên: 422 dp mặt gập → 1, 754 dp mặt trong xoay ngang → 2,
+              // 1000 → 3, 1400 → 4. Thẻ hẹp nhất rơi vào ~240 dp, và ở cỡ đó
+              // hàng nút trong thẻ đổi sang nút phụ chỉ-icon — xem [_BookCard].
+              var columns = (constraints.maxWidth / 320).round().clamp(1, 4).toInt();
+              // Máy gập thì ưu tiên số cột CHẴN — hướng dẫn nói lưới nên chia
+              // đều để nội dung tách gọn hai bên bản lề; số lẻ thì đúng cột giữa
+              // rơi vào khe gập. Chỉ HẠ xuống chứ không nâng lên: nâng là mọi
+              // thẻ hẹp thêm, mà thẻ hẹp đã phải bỏ chữ ở nút phụ rồi.
+              if (TuTheMayGap.chung.vungChia.isNotEmpty && columns > 2 && columns.isOdd) {
+                columns -= 1;
+              }
+              // 274 là nhu cầu thật của hai nút nhỏ đặt cạnh nhau: 15 + chữ
+              // "Nghe tiếp" + 8 + vòng icon 40, nhân hai, cộng khe 8 và lề 30
+              // của thẻ. Dưới mức đó thì cả hai nhãn đều bị cắt thành "Nghe…"
+              // và "Xuất…", lúc ấy một icon rõ ràng hơn một chữ cụt.
+              final hepTrongThe = constraints.maxWidth / columns < 274;
               return GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -143,7 +172,7 @@ class _LibraryPageState extends State<LibraryPage> {
                   // bình thường không bị tràn ngược lại.
                   mainAxisExtent: 234,
                 ),
-                itemBuilder: (context, i) => _BookCard(book: books[i]),
+                itemBuilder: (context, i) => _BookCard(book: books[i], hep: hepTrongThe),
               );
             },
           ),
@@ -219,8 +248,11 @@ class _ImportCard extends StatelessWidget {
 }
 
 class _BookCard extends StatefulWidget {
-  const _BookCard({required this.book});
+  const _BookCard({required this.book, this.hep = false});
   final Book book;
+
+  /// Thẻ hẹp hơn nhu cầu của hai nhãn nút — nút phụ bỏ chữ, còn lại cái icon.
+  final bool hep;
 
   @override
   State<_BookCard> createState() => _BookCardState();
@@ -301,17 +333,30 @@ class _BookCardState extends State<_BookCard> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Flexible(
-                  child: NutSac(
-                    nho: true,
-                    coGian: true,
-                    vienRong: true,
+                // Thẻ hẹp (mặt trong máy gập xếp hai cột, ~245 dp) thì nút phụ
+                // bỏ chữ: vòng tròn 40 dp cùng cỡ với chiều cao nút nhỏ bên
+                // cạnh, nên hàng không xô lệch, mà nút chính được nguyên nhãn
+                // "Nghe tiếp" thay vì cả hai cùng cụt thành "Nghe…"/"Xuất…".
+                if (widget.hep)
+                  NutTron(
+                    canh: 40,
                     sac: SacNut.phu,
-                    nhan: 'Xuất file',
                     hinh: Icons.arrow_downward_rounded,
+                    chuThich: 'Xuất file',
                     onNhan: _opening ? null : () => _open(2),
+                  )
+                else
+                  Flexible(
+                    child: NutSac(
+                      nho: true,
+                      coGian: true,
+                      vienRong: true,
+                      sac: SacNut.phu,
+                      nhan: 'Xuất file',
+                      hinh: Icons.arrow_downward_rounded,
+                      onNhan: _opening ? null : () => _open(2),
+                    ),
                   ),
-                ),
               ],
             ),
             const SizedBox(height: 2),

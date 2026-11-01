@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import '../models/settings.dart';
 import '../models/work_progress.dart';
 import '../services/storage.dart';
+import '../services/tu_the_may_gap.dart';
 import '../services/tts/model_store.dart';
 import '../services/tts/voice_pack.dart';
 import 'app_scope.dart';
@@ -85,10 +86,16 @@ class _SettingsPageState extends State<SettingsPage> {
       controller: _cuon,
       child: ListView(
       controller: _cuon,
-      padding: const EdgeInsets.fromLTRB(22, 20, 22, 26),
+      // Cộng lề mà khung ngoài truyền xuống (thanh tab native, thanh phát nổi,
+      // vạch cử chỉ). Không cộng thì mục cuối nằm khuất dưới thanh.
+      padding: const EdgeInsets.fromLTRB(22, 20, 22, 26)
+          .add(MediaQuery.paddingOf(context)) as EdgeInsets,
       children: [
         Text('Cài đặt', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 18),
+
+        // -- Tư thế máy -------------------------------------------------------
+        const _MucTuThe(),
 
         // -- Giọng đọc --------------------------------------------------------
         Card(
@@ -1163,4 +1170,126 @@ class _MucKiemAmState extends State<_MucKiemAm> {
           style: TextStyle(fontSize: 12.5)),
     ]);
   }
+}
+
+
+/// Hiện thẳng những gì cổng native trả về cho tư thế máy.
+///
+/// Có mục này vì bản đầu tiên hỏng **hoàn toàn lặng lẽ**: ứng dụng chạy theo
+/// scene nên `AppDelegate.window` còn nil lúc đăng ký, kênh không bao giờ được
+/// nối, phía Dart nuốt `MissingPluginException` rồi rơi về quy tắc theo bề
+/// ngang như cũ. Giao diện y hệt bản chưa sửa, không một dòng lỗi nào, và không
+/// có cách nào nhìn ra ngoài việc đọc mã.
+///
+/// Giờ thì nhìn một dòng là biết cổng còn sống hay không: "chưa nối được" nghĩa
+/// là kênh chết, mọi thứ bên dưới đang chạy bằng đường dự phòng.
+class _MucTuThe extends StatefulWidget {
+  const _MucTuThe();
+
+  @override
+  State<_MucTuThe> createState() => _MucTuTheState();
+}
+
+class _MucTuTheState extends State<_MucTuThe> {
+  @override
+  void initState() {
+    super.initState();
+    TuTheMayGap.chung.addListener(_moi);
+    TuTheMayGap.chung.capNhat();
+  }
+
+  @override
+  void dispose() {
+    TuTheMayGap.chung.removeListener(_moi);
+    super.dispose();
+  }
+
+  void _moi() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Chỉ iOS mới có cổng này; nơi khác hiện ra chỉ tổ rối.
+    if (!Platform.isIOS) return const SizedBox.shrink();
+
+    final t = TuTheMayGap.chung;
+    final hint = Theme.of(context).hintColor;
+    final khoMan = MediaQuery.sizeOf(context);
+    final noiDuoc = t.daNoiDuoc;
+
+    final canh = switch (t.canhThanhDoc) {
+      CanhThanhDoc.truoc => 'cạnh trước (thanh dọc)',
+      CanhThanhDoc.sau => 'cạnh sau (thanh dọc)',
+      CanhThanhDoc.khong => 'không — thanh nằm ngang',
+    };
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(noiDuoc ? Icons.check_circle_outline : Icons.warning_amber_rounded,
+                    size: 18,
+                    color: noiDuoc ? Colors.green : Theme.of(context).colorScheme.error),
+                const SizedBox(width: 9),
+                const Text('Tư thế máy',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (!noiDuoc)
+              Text(
+                'Chưa nối được cổng hệ thống — giao diện đang chạy bằng đường dự phòng '
+                'theo bề ngang, không theo tư thế máy.',
+                style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.error),
+              )
+            else ...[
+              _dong('Cạnh đặt thanh điều khiển', canh, hint),
+              _dong('Size class bề ngang', t.beRong ? 'rộng (màn trong)' : 'hẹp (màn ngoài)', hint),
+              _dong('Vùng bản lề',
+                  t.vungChia.isEmpty
+                      ? 'không có — máy không gập'
+                      : (t.banLeDangChia == null
+                          ? '${t.vungChia.length}, đang mở hẳn'
+                          : '${t.vungChia.length}, ĐANG CHIA ${t.banLeDangChia!.left.round()}'
+                              '–${t.banLeDangChia!.right.round()}'),
+                  hint),
+              _dong('Vùng camera che',
+                  t.vungChe.isEmpty ? 'không có' : '${t.vungChe.length}, chừa ${t.cheTrenThanhDoc.round()} dp',
+                  hint),
+            ],
+            _dong('Khổ màn', '${khoMan.width.round()} × ${khoMan.height.round()} dp', hint),
+            // Dải hệ thống dành cho thanh dọc hiện ra ở đây: nó là lề trái hoặc
+            // lề phải khác 0. Thanh điều hướng phải nằm đúng trong dải ấy.
+            _dong(
+              'Lề hệ thống (T/P/trên/dưới)',
+              '${MediaQuery.viewPaddingOf(context).left.round()} / '
+                  '${MediaQuery.viewPaddingOf(context).right.round()} / '
+                  '${MediaQuery.viewPaddingOf(context).top.round()} / '
+                  '${MediaQuery.viewPaddingOf(context).bottom.round()} dp',
+              hint,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dong(String ten, String gia, Color hint) => Padding(
+        padding: const EdgeInsets.only(bottom: 3),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 165,
+              child: Text(ten, style: TextStyle(fontSize: 12.5, color: hint)),
+            ),
+            Expanded(child: Text(gia, style: const TextStyle(fontSize: 12.5))),
+          ],
+        ),
+      );
 }

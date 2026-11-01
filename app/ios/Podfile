@@ -1,5 +1,12 @@
-# Uncomment this line to define a global platform for your project
-# platform :ios, '13.0'
+# Phải khai rõ, và phải KHỚP IPHONEOS_DEPLOYMENT_TARGET của Runner trong
+# project Xcode (15.1) cùng mức mà `dung-native-apple.sh` đặt cho llama.cpp.
+#
+# Bỏ trống thì CocoaPods lấy mặc định của Flutter (13.0), và từ Xcode 26 mức
+# thấp nhất còn dựng được là 15.0 — bản dựng chết ở "Target Integrity: the iOS
+# deployment target is set to 13.0, but the range of supported deployment target
+# versions is 15.0 to 27.1.x", trỏ vào Pods.xcodeproj chứ không vào gói nào, nên
+# rất khó lần ra là do dòng này.
+platform :ios, '15.1'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -39,5 +46,11 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    # `platform :ios` ở trên chỉ đặt mức cho project Pods; gói nào tự khai mức
+    # thấp hơn trong podspec thì vẫn giữ mức ấy ở target của nó và vẫn làm vỡ
+    # bản dựng. Ép lại từng target cho chắc.
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+    end
   end
 end

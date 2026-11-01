@@ -11,11 +11,13 @@ import '../models/settings.dart';
 import '../services/khoa_cam_ung.dart';
 import '../services/player_controller.dart';
 import '../services/tay_cam.dart';
+import '../services/tu_the_may_gap.dart';
 import 'app_scope.dart';
 import 'chon_giong.dart';
 import 'danh_sach_chuong.dart';
 import 'dieu_khien_tay_cam.dart';
 import 'kinh.dart';
+import 'ne_ban_le.dart';
 import 'nut_sac.dart';
 import 'reading_pane.dart';
 import 'theme.dart';
@@ -78,7 +80,10 @@ class _PlayerPageState extends State<PlayerPage> {
         final chapter = player.currentChapter;
         final wide = manHinhHaiCot(context);
 
-        final reading = ReadingPane(
+        // Khung đọc né khe bản lề: chữ là khối liền, cắt ngang là mất nghĩa.
+        // Lưới sách thì không cần — số cột chẵn đã cho khe rơi vào rãnh giữa.
+        final reading = NeBanLe(
+          child: ReadingPane(
           // Đổi chương thì dựng lại khung để nó nhảy đúng đoạn đầu chương mới.
           key: ValueKey(chapter?.index),
           chapter: chapter,
@@ -87,6 +92,7 @@ class _PlayerPageState extends State<PlayerPage> {
           // Chạm vào một đoạn LÀ tua: cắt việc đang đọc trước và im tiếng ngay.
           onTapChunk: (i) =>
               player.playChunk(i, autoplay: player.isPlaying, nguoiDungTua: true),
+          ),
         );
 
         return Focus(
@@ -100,22 +106,24 @@ class _PlayerPageState extends State<PlayerPage> {
               if (!wide) _ChapterBar(book: book, chapter: chapter),
               Expanded(
                 child: wide
-                    ? Row(
-                        children: [
-                          SizedBox(
-                            width: 280,
-                            child: DanhSachChuong(
-                              book: book,
-                              currentChapter: chapter,
-                              onChon: (chuong) => player.playChunk(
-                                chuong.firstChunk,
-                                autoplay: player.isPlaying,
+                    ? LayoutBuilder(
+                        builder: (context, o) => Row(
+                          children: [
+                            SizedBox(
+                              width: _rongCotChuong(o.maxWidth),
+                              child: DanhSachChuong(
+                                book: book,
+                                currentChapter: chapter,
+                                onChon: (chuong) => player.playChunk(
+                                  chuong.firstChunk,
+                                  autoplay: player.isPlaying,
+                                ),
                               ),
                             ),
-                          ),
-                          const VerticalDivider(width: 1),
-                          Expanded(child: reading),
-                        ],
+                            const VerticalDivider(width: 1),
+                            Expanded(child: reading),
+                          ],
+                        ),
                       )
                     : reading,
               ),
@@ -133,6 +141,33 @@ class _PlayerPageState extends State<PlayerPage> {
         );
       },
     );
+  }
+
+  /// Bề ngang cột chương ở bố cục hai cột.
+  ///
+  /// 280 dp cố định là cái sai mà người dùng báo: **gập hờ thì cột chương chiếm
+  /// một nửa**. Lúc máy gập nửa, bản lề cắt màn trong làm hai vùng dùng được, mỗi
+  /// vùng chỉ còn khoảng 430 dp — cột 280 dp ăn gần hai phần ba trang bên trái,
+  /// trong khi khung đọc mới là việc chính của màn hình này.
+  ///
+  /// Hai mức chặn, theo đúng hướng dẫn "các ngăn phải còn rõ khi máy gập" và
+  /// "đừng đổi bố cục đột ngột khi người ta đang gập":
+  ///
+  ///  * **Trần một phần ba** bề ngang, luôn luôn. Cột chương là thứ phụ.
+  ///  * **Kết thúc trước bản lề** nếu bản lề nằm dọc và đang cắt thật. Danh sách
+  ///    bắc qua khe gập thì mấy dòng giữa rơi vào chỗ màn hình đang cong, không
+  ///    đọc được mà cũng khó chạm. Chỉ lùi khi phần còn lại vẫn đủ rộng để là một
+  ///    danh sách chương (200 dp) — không thì thà bắc qua còn hơn thành một khe hẹp.
+  static double _rongCotChuong(double rongTong) {
+    var rong = rongTong / 3;
+    if (rong > 280) rong = 280;
+
+    final dai = TuTheMayGap.chung.daiBanLeDoc;
+    if (dai != null) {
+      final truocBanLe = dai.$1;
+      if (truocBanLe >= 200 && truocBanLe < rong) rong = truocBanLe;
+    }
+    return rong;
   }
 
   KeyEventResult _handleKey(KeyEvent event, PlayerController player) {
@@ -262,9 +297,24 @@ class _PlayerBar extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               _SpeedSelector(),
-              _SleepButton(),
-              _SoiAmButton(),
-              _KhoaCamUngButton(),
+              // Màn hình thấp thì ba nút "bật một cái rồi để đấy" thu vào một
+              // dấu ba chấm. Hàng này cần 538 dp để nằm một dòng (48+48+56+48+
+              // 48+10 cho phần tua, 90 cho ô tốc độ, 90 và 100 cho Hẹn giờ và
+              // Kiểm âm, thêm 75 nếu có nút Khoá của Android); mặt gập iPhone
+              // Duo chỉ rộng ~466 dp nên nó lùi thành hai dòng, mà chiều cao ở
+              // đó đang là thứ thiếu nhất. Gộp lại còn ~392 dp, vừa một dòng.
+              //
+              // Giữ lại ngoài hàng đúng phần người ta chạm liên tục: tua, phát,
+              // tốc độ. Ba nút kia bấm một lần cho cả buổi nghe, nằm trong menu
+              // không mất gì — trạng thái bật/tắt vẫn đọc được bằng màu ở từng
+              // dòng menu.
+              if (manHinhThap(context))
+                _NutThem()
+              else ...[
+                _SleepButton(),
+                _SoiAmButton(),
+                _KhoaCamUngButton(),
+              ],
             ],
           ),
         ],
@@ -368,12 +418,7 @@ class _SoiAmButton extends StatelessWidget {
         child: TextButton.icon(
           style: TextButton.styleFrom(foregroundColor: mau,
               padding: const EdgeInsets.symmetric(horizontal: 10), minimumSize: const Size(0, 40)),
-          onPressed: () {
-            state.settings.soiAmKhiNghe = !bat;
-            state.saveSettings();
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-                bat ? 'Đã tắt kiểm âm trước khi phát' : 'Đã bật kiểm âm wav2vec2. $chu')));
-          },
+          onPressed: () => doiSoiAm(context),
           icon: const Icon(Icons.check_circle_outline, size: 20),
           label: Text(bat && chu.startsWith('Chưa kiểm âm:') ? 'Chưa kiểm' : 'Kiểm âm'),
         ),
@@ -419,20 +464,110 @@ class _SleepButton extends StatelessWidget {
     return TextButton.icon(
       icon: Icon(active ? Icons.bedtime : Icons.bedtime_outlined, size: 18),
       label: Text(active ? 'Còn ${formatTime(player.sleepAt!.difference(DateTime.now()).inSeconds.toDouble())}' : 'Hẹn giờ'),
-      onPressed: () async {
-        final minutes = await showDialog<int>(
-          context: context,
-          builder: (context) => SimpleDialog(
-            title: const Text('Hẹn giờ tắt'),
-            children: [
-              for (final m in [10, 20, 30, 45, 60])
-                SimpleDialogOption(onPressed: () => Navigator.pop(context, m), child: Text('$m phút')),
-              SimpleDialogOption(onPressed: () => Navigator.pop(context, 0), child: const Text('Tắt hẹn giờ')),
-            ],
+      onPressed: () => henGioTat(context, player),
+    );
+  }
+}
+
+/// Hỏi số phút rồi đặt hẹn giờ tắt.
+///
+/// Tách ra khỏi [_SleepButton] vì menu ba chấm ở màn hình thấp cũng gọi tới —
+/// hai chỗ gọi cùng một hộp thoại thì đổi mốc phút chỉ phải sửa một nơi.
+Future<void> henGioTat(BuildContext context, PlayerController player) async {
+  final minutes = await showDialog<int>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: const Text('Hẹn giờ tắt'),
+      children: [
+        for (final m in [10, 20, 30, 45, 60])
+          SimpleDialogOption(onPressed: () => Navigator.pop(context, m), child: Text('$m phút')),
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, 0), child: const Text('Tắt hẹn giờ')),
+      ],
+    ),
+  );
+  if (minutes != null) {
+    player.setSleepTimer(minutes == 0 ? null : Duration(minutes: minutes));
+  }
+}
+
+/// Bật/tắt việc soi âm trước khi phát, kèm báo lại bằng snackbar.
+///
+/// Dùng chung cho nút ngoài hàng và dòng trong menu ba chấm.
+void doiSoiAm(BuildContext context) {
+  final state = AppScope.read(context);
+  final bat = state.settings.soiAmKhiNghe;
+  final chu = state.tts.kiemAm.thongBao.value;
+  state.settings.soiAmKhiNghe = !bat;
+  state.saveSettings();
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(bat ? 'Đã tắt kiểm âm trước khi phát' : 'Đã bật kiểm âm wav2vec2. $chu')));
+}
+
+/// Menu ba chấm gom Hẹn giờ, Kiểm âm và Khoá cảm ứng cho màn hình thấp.
+///
+/// Mỗi dòng tự mang màu trạng thái như nút gốc của nó — vàng là đang bật — nên
+/// mở menu ra là thấy ngay cái nào đang chạy, khỏi phải nhớ.
+class _NutThem extends StatelessWidget {
+  // Cùng lý do như [_PlayerBar]: không const, để build() chạy lại mỗi lượt vẽ
+  // và đọc được trạng thái mới nhất của hẹn giờ.
+  // ignore: prefer_const_constructors_in_immutables
+  _NutThem();
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final player = state.player;
+    final henGio = player.sleepAt != null;
+    final soiAm = state.settings.soiAmKhiNghe;
+    final nhan = SacNut.chinh.first;
+    final thuong = Theme.of(context).colorScheme.onSurface;
+
+    return PopupMenuButton<String>(
+      tooltip: 'Thêm',
+      icon: const Icon(Icons.more_horiz_rounded),
+      position: PopupMenuPosition.over,
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'hen',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(henGio ? Icons.bedtime : Icons.bedtime_outlined,
+                size: 20, color: henGio ? nhan : thuong),
+            title: Text(henGio
+                ? 'Còn ${formatTime(player.sleepAt!.difference(DateTime.now()).inSeconds.toDouble())}'
+                : 'Hẹn giờ tắt'),
           ),
-        );
-        if (minutes != null) {
-          player.setSleepTimer(minutes == 0 ? null : Duration(minutes: minutes));
+        ),
+        PopupMenuItem(
+          value: 'soiam',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.check_circle_outline, size: 20, color: soiAm ? nhan : thuong),
+            title: Text(soiAm ? 'Tắt kiểm âm' : 'Kiểm âm trước khi phát'),
+          ),
+        ),
+        // Chỉ Android có — xem `services/khoa_cam_ung.dart`.
+        if (khoaCamUngDungDuoc)
+          PopupMenuItem(
+            value: 'khoa',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.lock_outline, size: 20, color: SacNut.nguyHiem.first),
+              title: const Text('Khoá cảm ứng'),
+            ),
+          ),
+      ],
+      onSelected: (chon) {
+        switch (chon) {
+          case 'hen':
+            henGioTat(context, player);
+          case 'soiam':
+            doiSoiAm(context);
+          case 'khoa':
+            AppScope.read(context).batKhoaCamUng();
         }
       },
     );

@@ -1,0 +1,58 @@
+# Bản iOS viết thuần Swift. Sinh file .xcodeproj từ spec này, đừng sửa tay
+# project sinh ra — chạy `xcodegen generate` trong thư mục này là xong.
+#
+# Vì sao tách khỏi app/ios: bản Flutter vẫn còn nguyên cho Windows, Android và
+# macOS. Hai bản dùng CHUNG phần Rust ở native/ — engine đọc, sea-g2p, bộ mã hoá
+# âm thanh đều đã là thư viện C, Swift gọi thẳng như Dart vẫn gọi.
+name: SachLuoi
+options:
+  bundleIdPrefix: app.carrot4127
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: ZSAW7DHCBQ
+    CODE_SIGN_STYLE: Manual
+    PROVISIONING_PROFILE_SPECIFIER: 00008160-00041D5836900036TUWV6R_dev
+    CODE_SIGN_IDENTITY: iPhone Developer
+
+targets:
+  SachLuoi:
+    type: application
+    platform: iOS
+    sources:
+      - path: Nguon
+      # Dùng CHUNG tài nguyên với bản Flutter, không chép sang: từ điển âm vị
+      # 50 MB mà có hai bản thì chắc chắn sẽ lệch nhau.
+      - path: ../app/assets/sea_g2p.bin
+        buildPhase: resources
+      - path: ../app/assets/giong.json
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.carrot4127.ursaminor5536
+        PRODUCT_NAME: Sách lười
+        INFOPLIST_FILE: Nguon/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+        SWIFT_OBJC_BRIDGING_HEADER: Nguon/Cau.h
+        # llama.cpp trong engine v2 là mã C++, nên phải kéo runtime C++ vào.
+        OTHER_LDFLAGS: -lc++
+        # Thư viện Rust chỉ dựng lát arm64 cho máy ảo (xem dung-native-apple.sh),
+        # nên phải loại x86_64 ra — không thì bản máy ảo hỏng ở bước liên kết
+        # với một đống "Undefined symbols for architecture x86_64".
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+    dependencies:
+      # Chính thư viện Rust mà bản Flutter đang dùng — không dựng lại cái nào.
+      - framework: ../native/vendor/xcframeworks/sachnoi_vieneu.xcframework
+        embed: false
+      - framework: ../native/vendor/onnxruntime/ios/onnxruntime.xcframework
+        embed: false
+      # Thư viện Rust tĩnh không mang theo chỉ dẫn liên kết, nên ba framework
+      # này của ggml phải tự khai — xem mục Cạm bẫy trong CLAUDE.md.
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: Accelerate.framework

@@ -87,6 +87,12 @@ class _FastScrollBarState extends State<FastScrollBar> {
                     bo: 99,
                     mo: 12,
                     dam: _dragging ? 0.30 : 0.14,
+                    // KHÔNG lấy kính native ở đây: con trượt chạy theo ngón tay
+                    // từng khung hình, mà mỗi platform view là một lớp hợp ảnh
+                    // riêng bên native — dựng lại liên tục thì đắt hơn hẳn lớp
+                    // BackdropFilter của Flutter. Nó cũng cần `dam` đổi theo
+                    // trạng thái kéo, mà kính hệ thống không có núm ấy.
+                    thatKinh: false,
                     child: Center(
                       child: _dragging
                           ? Text(

@@ -19,6 +19,8 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import 'kinh_native.dart';
+
 /// Tấm kính bo góc.
 class Kinh extends StatelessWidget {
   const Kinh({
@@ -29,6 +31,7 @@ class Kinh extends StatelessWidget {
     this.dam,
     this.vien = true,
     this.padding,
+    this.thatKinh = true,
   });
 
   final Widget child;
@@ -45,8 +48,35 @@ class Kinh extends StatelessWidget {
   final bool vien;
   final EdgeInsetsGeometry? padding;
 
+  /// Cho phép dùng vật liệu kính THẬT của hệ thống trên iOS (platform view).
+  ///
+  /// Mặc định bật: mọi chỗ gọi [Kinh] đều là mảng lớn đứng yên — thanh điều
+  /// hướng, ô chọn giọng — đúng loại nên nhận kính thật.
+  ///
+  /// Tắt ở mảng thoáng qua hoặc nằm trong danh sách cuộn: mỗi platform view là
+  /// một lớp hợp ảnh riêng bên native, dựng rồi bỏ liên tục thì tốn hơn hẳn lớp
+  /// `BackdropFilter` mà Flutter tự vẽ. Nhãn nhảy số của thanh cuộn nhanh
+  /// (`fast_scrollbar.dart`) là đúng ca ấy.
+  final bool thatKinh;
+
   @override
   Widget build(BuildContext context) {
+    // Kính thật của hệ thống: Flutter không được cấp Liquid Glass cho widget
+    // của nó, nên phải nhúng một UIVisualEffectView xuống dưới. Xem
+    // `ui/kinh_native.dart`.
+    if (thatKinh && kinhNativeDungDuoc) {
+      return Stack(
+        children: [
+          // Nền kính nằm dưới cùng, trải hết chỗ: view native tự bo góc nên
+          // không bọc ClipRRect ở đây (Flutter clip platform view không đáng tin).
+          Positioned.fill(child: KinhNative(bo: bo)),
+          // Nội dung đi lên trên. Lớp này Flutter vẽ bình thường, và chính nó là
+          // phần kính phía dưới KHÔNG khúc xạ — kính chỉ bẻ những gì nằm sau nó.
+          Padding(padding: padding ?? EdgeInsets.zero, child: child),
+        ],
+      );
+    }
+
     final toi = Theme.of(context).brightness == Brightness.dark;
     // Cả hai nền đều phủ TRẮNG — kính bắt sáng chứ không đổ bóng. Khác nhau ở
     // độ đậm: nền tối chỉ cần một lớp mỏng, nền sáng phải dày hơn mới thấy.

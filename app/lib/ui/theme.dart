@@ -45,6 +45,38 @@ bool manHinhRong(BuildContext context) => MediaQuery.sizeOf(context).width >= 60
 /// đứng (~690 dp) vẫn một cột, xoay ngang (~830 dp) thì tách đôi.
 bool manHinhHaiCot(BuildContext context) => MediaQuery.sizeOf(context).width >= 720;
 
+/// Màn hình THẤP: chiều cao không đủ cho cả khung đọc lẫn hàng nút đầy đủ.
+///
+/// Hai ngưỡng trên chỉ đo bề ngang, mà máy gập hỏng ở chiều còn lại. iPhone Duo
+/// (iPhone19,4) rộng mà thấp ở cả hai mặt: gập lại ~466×678 dp, mở ra xoay
+/// ngang ~890×626 dp — suy từ 1398×2034 và 1878×2670 px ở tỉ lệ @3x, chưa đo
+/// trên máy thật. Trừ đảo động và vạch cử chỉ thì mặt gập chỉ còn ~585 dp dọc
+/// cho thanh chương + khung đọc + ô chọn giọng + hàng điều khiển, nên hàng nút
+/// lùi thêm một dòng là khung đọc mất gần một phần tư chỗ.
+///
+/// Ngưỡng này KHÔNG chỉ cho máy gập: điện thoại thường xoay ngang cũng rơi vào
+/// đây (iPhone 17 ngang là 852×393 dp), và ở đó hàng nút gọn lại cũng đúng.
+bool manHinhThap(BuildContext context) => MediaQuery.sizeOf(context).height < 700;
+
+/// Nền ứng dụng: chuyển sắc nhẹ thay vì một màu phẳng.
+///
+/// Không phải để trang trí. Kính Liquid Glass lấy hình ảnh từ thứ nằm sau nó;
+/// đặt trên nền phẳng một màu thì nó không có gì để bẻ, và ra đúng một mảng xám
+/// — "chưa thấy liquid glass ở chỗ nào". Thanh dọc thì nội dung không bao giờ
+/// cuộn ngang qua nó, nên nền chính là thứ duy nhất nằm sau tấm kính ấy. Một
+/// dải chuyển sắc chéo là đủ để mắt đọc ra độ sâu và phản sáng ở mép.
+LinearGradient nenUngDung(BuildContext context) {
+  final toi = Theme.of(context).brightness == Brightness.dark;
+  return LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: toi
+        ? const [Color(0xFF2A2140), namNen, Color(0xFF1B1526)]
+        : const [Color(0xFFFBF9F5), Color(0xFFF4F1EA), Color(0xFFEDE7DC)],
+    stops: const [0.0, 0.55, 1.0],
+  );
+}
+
 ThemeData buildTheme(Brightness brightness) {
   final scheme = ColorScheme.fromSeed(seedColor: _seed, brightness: brightness);
   final isDark = brightness == Brightness.dark;

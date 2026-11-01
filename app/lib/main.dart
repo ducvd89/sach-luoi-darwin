@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'services/native_lib.dart';
+import 'services/tu_the_may_gap.dart';
 import 'state/app_state.dart';
 import 'ui/app_scope.dart';
 import 'ui/dieu_khien_tay_cam.dart';
@@ -29,7 +30,7 @@ class SachLuoiApp extends StatefulWidget {
   State<SachLuoiApp> createState() => _SachLuoiAppState();
 }
 
-class _SachLuoiAppState extends State<SachLuoiApp> {
+class _SachLuoiAppState extends State<SachLuoiApp> with WidgetsBindingObserver {
   late final Future<AppState> _future = AppState.create();
   AppState? _state;
 
@@ -37,7 +38,21 @@ class _SachLuoiAppState extends State<SachLuoiApp> {
   final _khoaDieuHuong = GlobalKey<NavigatorState>();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    TuTheMayGap.chung.capNhat();
+  }
+
+  /// Gập, mở hay xoay máy đều đổi khổ màn, và đó là lúc cạnh đặt thanh dọc có
+  /// thể đổi theo. Hỏi lại hệ thống ở đây thay vì tự suy từ khổ mới — xem
+  /// `services/tu_the_may_gap.dart`.
+  @override
+  void didChangeMetrics() => TuTheMayGap.chung.capNhat();
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _state?.dispose();
     super.dispose();
   }
