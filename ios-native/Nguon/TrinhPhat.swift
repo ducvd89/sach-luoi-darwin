@@ -19,7 +19,7 @@ final class TrinhPhat {
   private(set) var dangTongHop = false
   private(set) var loi: String?
 
-  private var doan: [String] = []
+  private var doan: [Doan] = []
   private var giong = ""
   /// Mẫu âm của đoạn kế đã tổng hợp sẵn.
   private var samTruoc: (chiSo: Int, mau: [Float])?
@@ -81,14 +81,14 @@ final class TrinhPhat {
     // Nhảy qua những đoạn không có gì để đọc. Sách đã nhập trước khi có bộ lọc
     // ở `CatDoan` vẫn còn chúng, nên phải chắn ở đây nữa.
     var chiSo = doanDang
-    while chiSo < doan.count, !CatDoan.docDuoc(doan[chiSo]) { chiSo += 1 }
+    while chiSo < doan.count, !CatDoan.docDuoc(doan[chiSo].doc) { chiSo += 1 }
     guard chiSo < doan.count else {
       doanDang = doan.count
       dangPhat = false
       return
     }
     if chiSo != doanDang { doanDang = chiSo }
-    let van = doan[chiSo]
+    let van = doan[chiSo].doc
 
     Task.detached(priority: .userInitiated) { [weak self] in
       guard let self else { return }
@@ -138,9 +138,9 @@ final class TrinhPhat {
 
       // Đọc trước đoạn kế NGAY, trong lúc đoạn này đang phát.
       var ke = chiSo + 1
-      while ke < self.doan.count, !CatDoan.docDuoc(self.doan[ke]) { ke += 1 }
+      while ke < self.doan.count, !CatDoan.docDuoc(self.doan[ke].doc) { ke += 1 }
       guard ke < self.doan.count, cua == self.phien else { return }
-      if let m = may.doc(self.doan[ke], giong: self.giong), cua == self.phien {
+      if let m = may.doc(self.doan[ke].doc, giong: self.giong), cua == self.phien {
         self.samTruoc = (ke, m)
       }
     }

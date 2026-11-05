@@ -13,21 +13,72 @@ enum NhapSach {
 
   struct ChuongThat {
     var ten: String
-    var doan: [String]
+    var doan: [Doan]
   }
 
-  static func nhap(tuFile url: URL) throws -> KetQua {
+  /// Một chương CHƯA cắt đoạn: tên và cả khối văn bản đã dọn thẻ.
+  struct ChuongTho {
+    var ten: String
+    var van: String
+  }
+
+  struct ThoKetQua {
+    var ten: String
+    var tacGia: String
+    var chuong: [ChuongTho]
+    /// EPUB mới có trang mục lục và dòng chạy để dọn; TXT thì không.
+    var laEpub: Bool
+  }
+
+  /// Tách chương, CHƯA cắt đoạn.
+  ///
+  /// Hai tầng riêng, như bản Flutter tách `epub_parser.dart`/`txt_parser.dart`
+  /// khỏi `chunker.dart`. Không chỉ cho gọn: bảng chữ hoa tên riêng phải quét
+  /// xong cả cuốn mới dựng được, mà nó đổi phần đọc lên nên đổi luôn cách chia
+  /// đoạn — không cắt được chương nào trước khi đọc hết sách. Tách ra thì chỗ
+  /// đối chiếu với bản Flutter cũng cắt được trên đúng văn bản thô ấy, thay vì
+  /// trên văn bản dựng lại từ các đoạn đã cắt (so như thế là so với chính mình).
+  static func tachTho(tuFile url: URL) throws -> ThoKetQua {
     let duoi = url.pathExtension.lowercased()
     let d = try Data(contentsOf: url)
     return duoi == "epub"
-      ? try epub(d, ten: url.deletingPathExtension().lastPathComponent)
-      : txt(String(decoding: d, as: UTF8.self),
-            ten: url.deletingPathExtension().lastPathComponent)
+      ? try epubTho(d, ten: url.deletingPathExtension().lastPathComponent)
+      : txtTho(String(decoding: d, as: UTF8.self),
+               ten: url.deletingPathExtension().lastPathComponent)
+  }
+
+  static func nhap(tuFile url: URL, moSo: Bool = true) throws -> KetQua {
+    cat(try tachTho(tuFile: url), moSo: moSo)
+  }
+
+  /// Cắt đoạn cho cả cuốn đã tách thô.
+  static func cat(_ tho: ThoKetQua, moSo: Bool = true) -> KetQua {
+    let bang = CatDoan.bangChuHoa(tho.chuong.flatMap { [$0.ten, $0.van] })
+
+    var chuong: [ChuongThat] = []
+    for t in tho.chuong {
+      var doan = CatDoan.cat(t.van, bang: bang, moSo: moSo)
+      if tho.laEpub {
+        if DonSach.laMucLuc(ten: t.ten, doan: doan) { continue }
+        doan = DonSach.boTieuDeLap(ten: t.ten, doan: doan)
+      }
+      guard !doan.isEmpty else { continue }
+      chuong.append(ChuongThat(ten: t.ten, doan: doan))
+    }
+
+    if tho.laEpub {
+      // Quét cả sách một lượt để tìm dòng chạy — phải có đủ chương mới thấy
+      // được thứ gì là lặp, nên làm sau vòng trên chứ không làm trong đó.
+      let sach = DonSach.boDongChay(chuong.map(\.doan))
+      for i in chuong.indices { chuong[i].doan = sach[i] }
+      chuong.removeAll { $0.doan.isEmpty }
+    }
+    return KetQua(ten: tho.ten, tacGia: tho.tacGia, chuong: chuong)
   }
 
   // MARK: - EPUB
 
-  static func epub(_ d: Data, ten: String) throws -> KetQua {
+  static func epubTho(_ d: Data, ten: String) throws -> ThoKetQua {
     guard let muc = Zip.doc(d) else { throw Loi.khongDocDuoc("không phải file ZIP hợp lệ") }
 
     // container.xml chỉ ra file OPF; đường dẫn OPF không cố định nên phải đọc.
@@ -50,47 +101,45 @@ enum NhapSach {
       }
     }
 
-    var chuong: [ChuongThat] = []
+    // HAI LƯỢT, và thứ tự ấy là bắt buộc.
+    //
+    // Lượt đầu chỉ tách chương và dọn thẻ. Bảng *chữ hoa → dạng thường gặp*
+    // (`CatDoan.bangChuHoa`) phải quét xong CẢ CUỐN mới dựng được, mà nó lại
+    // đổi phần đọc lên — và trần 280 đo trên phần đọc, nên nó đổi luôn cách
+    // chia đoạn. Cắt một chương trước khi đọc hết sách là cắt bằng một bảng
+    // chưa đầy đủ, ra bộ đoạn khác với bản Flutter.
+    var tho: [(ten: String, van: String)] = []
     for the in cacThe(opf, "itemref") {
       guard let idref = thuocTinhTrong(the, "idref"), let h = href[idref] else { continue }
       let duong = goc.isEmpty ? h : "\(goc)/\(h)"
       guard let m = muc[goBo(duong)] ?? muc[duong], let md = Zip.ruot(d, m) else { continue }
       let html = String(decoding: md, as: UTF8.self)
-      let tenC = giuaThe(html, "h1") ?? giuaThe(html, "h2") ?? giuaThe(html, "title") ?? "Chương \(chuong.count + 1)"
+      let tenC = giuaThe(html, "h1") ?? giuaThe(html, "h2") ?? giuaThe(html, "title") ?? "Chương \(tho.count + 1)"
       let than = boThe(html)
       guard than.count > 40 else { continue }
       let tenSach2 = donChuoi(tenC)
-      var doan = CatDoan.cat(DonSach.boTieuDeLapVan(ten: tenSach2, tenSach: tenSach, tacGia: tacGia, van: than))
-      if DonSach.laMucLuc(ten: tenSach2, doan: doan) { continue }
-      doan = DonSach.boTieuDeLap(ten: tenSach2, doan: doan)
-      guard !doan.isEmpty else { continue }
-      chuong.append(ChuongThat(ten: tenSach2, doan: doan))
+      tho.append((tenSach2, DonSach.boTieuDeLapVan(
+        ten: tenSach2, tenSach: tenSach, tacGia: tacGia, van: than)))
     }
+    guard !tho.isEmpty else { throw Loi.khongDocDuoc("không tìm thấy chương nào") }
 
-    guard !chuong.isEmpty else { throw Loi.khongDocDuoc("không tìm thấy chương nào") }
-
-    // Quét cả sách một lượt để tìm dòng chạy — phải có đủ chương mới thấy được
-    // thứ gì là lặp, nên làm sau vòng trên chứ không làm trong đó.
-    let sach = DonSach.boDongChay(chuong.map(\.doan))
-    for i in chuong.indices { chuong[i].doan = sach[i] }
-    chuong.removeAll { $0.doan.isEmpty }
-    return KetQua(ten: donChuoi(tenSach), tacGia: donChuoi(tacGia), chuong: chuong)
+    return ThoKetQua(ten: donChuoi(tenSach), tacGia: donChuoi(tacGia),
+                     chuong: tho.map { ChuongTho(ten: $0.ten, van: $0.van) }, laEpub: true)
   }
 
   // MARK: - TXT
 
-  static func txt(_ s: String, ten: String) -> KetQua {
+  static func txtTho(_ s: String, ten: String) -> ThoKetQua {
     // Tách chương theo dòng bắt đầu bằng "Chương"/"Chapter" + số. Cố ý đơn
     // giản: file TXT không có cấu trúc nào đáng tin hơn.
-    var chuong: [ChuongThat] = []
+    var tho: [(ten: String, van: String)] = []
     var tenHienTai = "Mở đầu"
     var gom: [String] = []
 
     func chot() {
       let than = gom.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
       if than.count > 40 {
-        let doan = CatDoan.cat(DonSach.boTieuDeLapVan(ten: tenHienTai, van: than))
-        if !doan.isEmpty { chuong.append(ChuongThat(ten: tenHienTai, doan: doan)) }
+        tho.append((tenHienTai, DonSach.boTieuDeLapVan(ten: tenHienTai, van: than)))
       }
       gom = []
     }
@@ -106,10 +155,9 @@ enum NhapSach {
     }
     chot()
 
-    if chuong.isEmpty {
-      chuong = [ChuongThat(ten: ten, doan: CatDoan.cat(s))]
-    }
-    return KetQua(ten: ten, tacGia: "", chuong: chuong)
+    if tho.isEmpty { tho = [(ten, s)] }
+    return ThoKetQua(ten: ten, tacGia: "",
+                     chuong: tho.map { ChuongTho(ten: $0.ten, van: $0.van) }, laEpub: false)
   }
 
   private static func laTieuDeChuong(_ s: String) -> Bool {

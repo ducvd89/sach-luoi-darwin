@@ -96,7 +96,7 @@ struct KhungDoc: View {
 
         ForEach(chuong.doan.indices, id: \.self) { i in
           let doanDang = phat.doanDang
-          Text(chuong.doan[i])
+          Text(chuong.doan[i].hien)
             .font(.system(size: 18))
             .lineSpacing(7)
             .padding(14)

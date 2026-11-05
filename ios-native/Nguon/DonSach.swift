@@ -13,7 +13,7 @@ enum DonSach {
   /// hàng nghìn dòng — đo trên ba cuốn thật: Phàm Nhân Tu Tiên ra một chương
   /// "Mục lục" 4940 đoạn, Đạo ra một chương tiêu đề 2998 đoạn. Đọc lên thì nó
   /// là hàng giờ đọc tên chương.
-  static func laMucLuc(ten: String, doan: [String]) -> Bool {
+  static func laMucLuc(ten: String, doan: [Doan]) -> Bool {
     let t = ten.lowercased()
     if ["mục lục", "muc luc", "contents", "table of contents", "nav"].contains(where: t.contains) {
       return true
@@ -22,9 +22,9 @@ enum DonSach {
     // sách. Dấu hiệu chắc hơn là RẤT nhiều đoạn mà đoạn nào cũng ngắn và phần
     // lớn bắt đầu bằng "Chương".
     guard doan.count > 200 else { return false }
-    let ngan = doan.filter { $0.count < 60 }.count
+    let ngan = doan.filter { $0.hien.count < 60 }.count
     let batDauChuong = doan.filter {
-      let l = $0.lowercased()
+      let l = $0.hien.lowercased()
       return l.hasPrefix("chương") || l.hasPrefix("chapter") || l.hasPrefix("quyển")
     }.count
     return ngan > doan.count * 3 / 4 && batDauChuong > doan.count / 2
@@ -41,15 +41,15 @@ enum DonSach {
   ///
   /// Chỉ xét dòng ngắn, và chỉ bỏ khi lặp ở hơn nửa số chương — ngưỡng ấy đủ
   /// cao để một câu mở đầu bình thường không bao giờ dính.
-  static func boDongChay(_ chuong: [[String]]) -> [[String]] {
+  static func boDongChay(_ chuong: [[Doan]]) -> [[Doan]] {
     guard chuong.count >= 4 else { return chuong }
 
     var dem: [String: Int] = [:]
     for dong in chuong {
       // Ba dòng đầu mỗi chương là đủ: dòng chạy không bao giờ nằm sâu hơn.
       var thay = Set<String>()
-      for d in dong.prefix(3) where d.count < 80 {
-        let c = chuan(d)
+      for d in dong.prefix(3) where d.hien.count < 80 {
+        let c = chuan(d.hien)
         if !c.isEmpty { thay.insert(c) }
       }
       for c in thay { dem[c, default: 0] += 1 }
@@ -61,7 +61,7 @@ enum DonSach {
 
     return chuong.map { dong in
       var d = dong
-      while let dau = d.first, xau.contains(chuan(dau)) || chuan(dau).isEmpty {
+      while let dau = d.first, xau.contains(chuan(dau.hien)) || chuan(dau.hien).isEmpty {
         d.removeFirst()
       }
       return d
@@ -118,10 +118,10 @@ enum DonSach {
   ///
   /// Có lưới chặn: phần tên rút về rỗng ở CẢ HAI phía thì KHÔNG khớp, kẻo
   /// "Chương 1" xoá nhầm dòng mở đầu của "Chương 2".
-  static func boTieuDeLap(ten: String, doan: [String]) -> [String] {
+  static func boTieuDeLap(ten: String, doan: [Doan]) -> [Doan] {
     guard let dau = doan.first else { return doan }
 
-    let a = chuan(dau)
+    let a = chuan(dau.hien)
     let b = chuan(ten)
     if a == b { return Array(doan.dropFirst()) }
 

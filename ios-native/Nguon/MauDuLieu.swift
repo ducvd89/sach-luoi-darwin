@@ -9,14 +9,15 @@ struct Chuong: Identifiable, Hashable, Codable {
   var id = UUID()
   var so: Int
   var ten: String
-  /// Các đoạn đã cắt sẵn. Cắt MỘT LẦN lúc nhập, không cắt lại lúc chạy — đổi
-  /// cách cắt thì sách cũ phải nhập lại mới thấy hiệu lực.
-  var doan: [String]
+  /// Các đoạn đã cắt sẵn, mỗi đoạn gồm phần hiện và phần đọc. Cắt MỘT LẦN lúc
+  /// nhập, không cắt lại lúc chạy — đổi cách cắt hay cách chuẩn hoá thì sách cũ
+  /// phải nhập lại mới thấy hiệu lực.
+  var doan: [Doan]
 
   /// Ước lượng thời lượng: đo trên bản Flutter, khoảng 14 ký tự một giây ở
   /// tốc độ 1.0×. Dùng để hiện trước khi đọc thật.
   var thoiLuong: TimeInterval {
-    Double(doan.reduce(0) { $0 + $1.count }) / 14.0
+    Double(doan.reduce(0) { $0 + $1.hien.count }) / 14.0
   }
 }
 

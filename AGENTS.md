@@ -794,6 +794,67 @@ xcodebuild -project SachLuoi.xcodeproj -scheme SachLuoi -configuration Release \
 trước. `sea_g2p.bin` và `giong.json` nhúng thẳng từ `app/assets/`, **dùng chung file** chứ
 không chép sang: từ điển 50 MB mà có hai bản thì chắc chắn sẽ lệch.
 
+### Chuẩn hoá và cắt đoạn phải khớp TỪNG ĐOẠN với bản Flutter
+
+Tầng `core/` bằng Dart là thứ duy nhất phải viết lại, và nó đã có ở `ios-native/Nguon/`:
+`CatDoan.swift` ← `chunker.dart`, `ChuanHoa.swift` ← `text_normalizer.dart`,
+`SoViet.swift` ← `vi_number.dart`.
+
+**Mốc để biết bản dịch đúng là hai bản cắt ra ĐÚNG MỘT BỘ ĐOẠN, so từng ký tự — cả phần
+hiện lẫn phần đọc.** Không phải cho gọn: khoá cache âm gồm chính nội dung đoạn, nên lệch
+một ranh giới là lệch mọi đoạn phía sau, cache hỏng sạch, và cùng một cuốn sách đọc trên
+Windows với trên iPhone ra hai kiểu. Soi bằng hai tool, chạy trên cùng một văn bản thô:
+
+```bash
+cd app && dart run tool/soi_cat_doan.dart van.txt ra.txt 1   # 1/0 = mở số hay không
+```
+
+Đo trên ba cuốn thật (245.000 đoạn: Phàm Nhân Tu Tiên, Đạo, Harry Potter tập 4) thì hiện
+khớp 0 lệch ở cả hai phần. Trước khi sửa thì lệch 141.000 đoạn — và lệch **lặng lẽ**, vì
+nhìn trên màn hình đoạn nào cũng trông bình thường.
+
+Năm chỗ sai, bốn trong số đó là khác biệt giữa Swift và Dart chứ không phải lỗi đánh máy:
+
+- **Trần 280 đo trên phần ĐỌC, không phải phần hiện.** `push` của `chunker.dart` chuẩn hoá
+  trước rồi mới so, và nếu phần đọc vượt trần thì nó cắt lại phần hiện theo đúng tỉ lệ nở
+  (`tranHienThi = hien * 280 / doc`) rồi đẩy lại từng mẩu. Bản 2.0.0a không có tầng chuẩn
+  hoá nên không có gì để đo, và mọi mẩu nở quá trần đều lọt — mô hình hết lượt sinh giữa
+  chừng, đoạn mất đuôi, không báo lỗi gì. Chuẩn hoá nở thật: mỗi từ ghép viết dính đội thêm
+  chín ký tự thẻ `<en></en>`, "1.234.567" chín ký tự thành hơn năm mươi. Đo trên Đạo chương
+  82: một từ dính ("thiệpHuyền") đẩy mẩu 280 lên 289, bản Flutter cắt thành 151 + 128.
+- **`String.count` của Swift KHÔNG phải `String.length` của Dart.** Swift đếm cụm ký tự
+  hiển thị, Dart đếm đơn vị mã UTF-16. Sách EPUB thật trộn cả dạng tổ hợp — cùng chữ "ắ" có
+  chỗ là U+1EAF, có chỗ là "a" cộng dấu rời. Một đoạn Dart thấy 82 thì Swift thấy 79, đủ để
+  đổi phía phép so `tong > dich`: **5.045 trên 6.150 đoạn của Harry Potter lệch chỉ vì
+  chuyện này.** Dùng `.dai` (`utf16.count`) cho mọi phép đo độ dài, đừng dùng `.count`.
+  Chuẩn hoá về NFC không chữa được — bản này sẽ đếm 79 mà bản Flutter vẫn đếm 82.
+- **`String` của Swift so sánh và băm theo tương đương chính tắc.** `"xi" + dấu sắc rời`
+  BẰNG `"xíu"` dựng sẵn, nên `Dictionary<String, …>` gộp hai dạng vào một ô còn Dart thì
+  không. Bảng chữ hoa tên riêng vì thế tra ra khoá mà bản Flutter không có: "XÍU" viết dạng
+  tổ hợp bị hạ thành "xíu" — 170 đoạn của Đạo, và **chỉ lệch ở phần đọc** nên màn hình
+  không hé ra gì. Khoá bảng phải là `KhoaTho` (gói `[UInt16]`), và `hoaToanBo` cũng so bằng
+  mảng đơn vị mã.
+- **Luật regex của ICU khác luật của Dart ở bốn chỗ**, nên mọi mẫu đi qua `Rx` để dịch
+  trước khi biên dịch: `\b` của ICU tính theo chữ Unicode (chữ Việt có dấu nằm trong `\w`
+  của nó, nên mọi `\b` cạnh chữ có dấu đổi nghĩa — mà sách tiếng Việt thì chỗ nào cũng có),
+  `\d` của ICU là mọi chữ số Unicode, `\s` thiếu `\v` và `﻿`, và `$` của ICU khớp cả
+  trước ký tự xuống dòng cuối. `Rx` cũng nhớ mẫu đã biên dịch — cắt một cuốn gọi tới hàng
+  trăm nghìn lượt.
+- **`chotDau` chỉ được gỡ chuỗi dấu dở dang ở cuối, không gỡ tiếp khoảng trắng phía
+  trước.** Mẫu `[,:–—-]+\s*$` của bản Flutter có khoảng trắng nằm SAU dấu, mà chuỗi đã cắt
+  sạch khoảng trắng cuối từ trước nên nó không ăn gì. Và lớp dấu hết câu ở đây là `[.!?;…]`,
+  **có `…`** — khác `dauKet` của phép tách câu; `…"` cũng phải tính là đã có dấu dừng.
+
+Hệ quả kiến trúc: bảng chữ hoa tên riêng phải quét xong CẢ CUỐN mới dựng được, mà nó đổi
+phần đọc nên đổi luôn cách chia đoạn — **không cắt được chương nào trước khi đọc hết sách.**
+Vì thế `NhapSach` tách làm hai tầng như bản Flutter tách `epub_parser.dart` khỏi
+`chunker.dart`: `tachTho` chỉ tách chương và dọn thẻ, `cat` mới cắt. Tách ra thì chỗ đối
+chiếu cũng cắt được trên đúng văn bản thô, thay vì trên văn bản dựng lại từ các đoạn đã cắt
+(so như thế là so với chính mình, và nó từng cho ra "khớp" giả).
+
+`Doan` giữ hai phần — `hien` cho màn hình, `doc` cho engine — và đọc được cả dạng cũ (một
+chuỗi trần) để thư viện đã lưu không mất khi cập nhật.
+
 ### Cạm bẫy của bản native
 
 **Bản máy ảo phải loại `x86_64`.** Thư viện Rust chỉ dựng lát arm64 cho simulator, nên thiếu
@@ -833,7 +894,7 @@ xcrun simctl launch --terminate-running-process <udid> app.carrot4127.ursaminor5
 xcrun simctl io <udid> screenshot ra.png      # kèm SIMCTL_CHILD_TAB=0..3
 ```
 
-### Còn dở ở 2.0.0a
+### Còn dở
 
 Chọn engine trong Cài đặt mới đổi chữ, chưa đổi engine thật (luôn dùng v3). Kiểm âm mới tải
 được chứ chưa chạy. Xuất file chưa làm. Nhân bản giọng chưa có.
