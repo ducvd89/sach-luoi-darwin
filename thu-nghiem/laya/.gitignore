@@ -1,0 +1,5 @@
+venv/
+ck*/
+__pycache__/
+sach/
+ldk/
