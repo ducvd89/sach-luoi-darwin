@@ -167,6 +167,20 @@ struct Rx {
     }
   }
 
+  /// Tách chuỗi tại mọi lượt khớp, như `String.split(RegExp)` của Dart: phần
+  /// rỗng ở hai đầu vẫn giữ.
+  func tach(_ s: String) -> [String] {
+    let ns = s as NSString
+    var ra: [String] = []
+    var cuoi = 0
+    for m in re.matches(in: s, options: [], range: NSRange(location: 0, length: ns.length)) {
+      ra.append(ns.substring(with: NSRange(location: cuoi, length: m.range.location - cuoi)))
+      cuoi = m.range.location + m.range.length
+    }
+    ra.append(ns.substring(from: cuoi))
+    return ra
+  }
+
   /// Mọi lượt khớp, trả về chuỗi khớp.
   func timHet(_ s: String) -> [String] {
     let ns = s as NSString

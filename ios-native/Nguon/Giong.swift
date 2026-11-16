@@ -38,12 +38,37 @@ final class CaiDat {
   static let chung = CaiDat()
 
   private static let khoaGiong = "giongChon"
+  private static let khoaTocDo = "tocDo"
 
   var giongChon: String {
     didSet { UserDefaults.standard.set(giongChon, forKey: Self.khoaGiong) }
   }
 
+  /// Tốc độ nghe. Áp lúc PHÁT (đổi nhịp giữ cao độ), không đọc lại — như bản
+  /// Flutter, nên đổi là nghe thấy ngay. Bản trước chỉ đổi chữ trên nút.
+  var tocDo: Double {
+    didSet {
+      UserDefaults.standard.set(tocDo, forKey: Self.khoaTocDo)
+      let v = tocDo
+      Task { @MainActor in Loa.chung.datTocDo(v) }
+    }
+  }
+
+  /// Soi lại từng đoạn bằng wav2vec2 trước khi phát, đọc lại tối đa 2 lần nếu
+  /// số âm lệch khỏi 100–110% — `soiAmKhiNghe` của bản Flutter, mặc định tắt.
+  var kiemAm: Bool {
+    didSet { UserDefaults.standard.set(kiemAm, forKey: Self.khoaKiemAm) }
+  }
+  private static let khoaKiemAm = "kiemAmKhiNghe"
+
+  /// Khoảng tốc độ của thanh trượt. Lưu từ bản cũ (menu có 0,75×) mà ra ngoài
+  /// khoảng thì kẹp lại.
+  static let khoangTocDo = 0.7...2.0
+
   private init() {
+    let td = UserDefaults.standard.double(forKey: Self.khoaTocDo)
+    tocDo = td > 0 ? min(max(td, Self.khoangTocDo.lowerBound), Self.khoangTocDo.upperBound) : 1.0
+    kiemAm = UserDefaults.standard.bool(forKey: Self.khoaKiemAm)
     let luu = UserDefaults.standard.string(forKey: Self.khoaGiong)
     // Giọng đã lưu có thể không còn trong danh sách (đổi bộ giọng), nên phải
     // soi lại chứ không tin thẳng.

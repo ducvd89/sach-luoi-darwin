@@ -772,7 +772,8 @@ xcrun swiftc -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" -target arm64-apple-
 ## Bản iOS viết thuần Swift (`ios-native/`)
 
 Từ 2.0.0a repo có HAI bản cho iOS. Bản Flutter trong `app/` vẫn là bản chính cho
-Windows, Android và macOS; `ios-native/` là app SwiftUI riêng, chỉ cho iPhone.
+Windows, Android và macOS; `ios-native/` là app SwiftUI riêng cho iPhone, và cùng mã ấy
+dựng thêm một target Mac (`SachLuoiMac`) — xem "Target Mac" bên dưới.
 
 **Vì sao tách ra.** Hệ thống chỉ cấp thanh điều hướng dọc của iPhone Duo, Liquid Glass, cụm
 capsule và menu tràn cho **thành phần chuẩn của UIKit/SwiftUI**. Flutter vẽ mọi pixel bằng
@@ -790,7 +791,7 @@ xcodebuild -project SachLuoi.xcodeproj -scheme SachLuoi -configuration Release \
   -destination 'generic/platform=iOS' -derivedDataPath build build
 ```
 
-`.xcodeproj` và hai thư mục dựng đã vào `.gitignore` — clone về phải `xcodegen generate`
+`.xcodeproj` và các thư mục dựng (`build`, `buildsim`, `buildmac`) đã vào `.gitignore` — clone về phải `xcodegen generate`
 trước. `sea_g2p.bin` và `giong.json` nhúng thẳng từ `app/assets/`, **dùng chung file** chứ
 không chép sang: từ điển 50 MB mà có hai bản thì chắc chắn sẽ lệch.
 
@@ -803,14 +804,16 @@ Tầng `core/` bằng Dart là thứ duy nhất phải viết lại, và nó đ�
 **Mốc để biết bản dịch đúng là hai bản cắt ra ĐÚNG MỘT BỘ ĐOẠN, so từng ký tự — cả phần
 hiện lẫn phần đọc.** Không phải cho gọn: khoá cache âm gồm chính nội dung đoạn, nên lệch
 một ranh giới là lệch mọi đoạn phía sau, cache hỏng sạch, và cùng một cuốn sách đọc trên
-Windows với trên iPhone ra hai kiểu. Soi bằng hai tool, chạy trên cùng một văn bản thô:
+Windows với trên iPhone ra hai kiểu. Một lệnh soi cả hai bên — nó rút văn bản thô bằng bộ
+tách chương của bản Swift rồi đưa CÙNG văn bản ấy cho `app/tool/soi_cat_doan.dart` và
+`ios-native/tool/soi-cat-doan/main.swift`, so từng ký tự:
 
 ```bash
-cd app && dart run tool/soi_cat_doan.dart van.txt ra.txt 1   # 1/0 = mở số hay không
+ios-native/tool/soi-cat-doan.sh sach.epub 1   # 1/0 = mở số hay không; nhận cả .txt
 ```
 
-Đo trên ba cuốn thật (245.000 đoạn: Phàm Nhân Tu Tiên, Đạo, Harry Potter tập 4) thì hiện
-khớp 0 lệch ở cả hai phần. Trước khi sửa thì lệch 141.000 đoạn — và lệch **lặng lẽ**, vì
+Đo trên ba cuốn thật (245.000 đoạn: Phàm Nhân Tu Tiên, Đạo, Harry Potter tập 4) cộng bản TXT
+của Phàm Nhân Tu Tiên thì hiện khớp 0 lệch ở cả hai phần, cả khi bật lẫn tắt mở số. Trước khi sửa thì lệch 141.000 đoạn — và lệch **lặng lẽ**, vì
 nhìn trên màn hình đoạn nào cũng trông bình thường.
 
 Năm chỗ sai, bốn trong số đó là khác biệt giữa Swift và Dart chứ không phải lỗi đánh máy:
@@ -855,7 +858,59 @@ chiếu cũng cắt được trên đúng văn bản thô, thay vì trên văn b
 `Doan` giữ hai phần — `hien` cho màn hình, `doc` cho engine — và đọc được cả dạng cũ (một
 chuỗi trần) để thư viện đã lưu không mất khi cập nhật.
 
+`CatDoan.cat` tự chạy `ChuanHoa.deHien` lên văn bản trước khi cắt, như `buildChunks` chạy
+`normalizeForDisplay`. Bản 2.0.0a thiếu bước ấy: ký tự vô hình, NBSP, khoảng trắng đôi lọt
+lên màn và vào engine. Tiêu đề chương cũng thành một đoạn riêng đọc lên trước thân chương
+(`CatDoan.tieuDe`, `Doan.tieuDe`) — nó không đụng bộ đệm của thân chương nên không làm lệch
+cách chia, và được chèn SAU các bước dọn của `DonSach` (chúng so đoạn đầu với tên chương, có
+tiêu đề nằm đó là xoá nhầm chính nó).
+
+Tách chương (`NhapSach`) là bản dịch của `epub_parser.dart` và `txt_parser.dart`: đủ thực thể
+HTML kể cả dạng số, tên chương lấy từ nav/NCX, href giải `%20`, bỏ `linear="no"` và số chú
+thích; TXT nhận BOM, UTF-16 và lùi về Latin-1.
+
 ### Cạm bẫy của bản native
+
+**Hạt giống KHÔNG được dùng `String.hashValue`.** Swift gieo ngẫu nhiên hàm băm ấy mỗi lần
+chạy — cùng một đoạn đọc ra giọng khác sau mỗi lần mở app. `Engine.hatGiong` là FNV-1a 64
+bit trên đơn vị mã UTF-16 với khoá `giọng|văn bản`, đúng `_seedOf` của bản Flutter.
+
+**Mọi lượt gọi vào handle engine đi qua MỘT hàng đợi tuần tự** (`Engine.hang`).
+`vieneu_synthesize` lấy `&mut` trên handle mà không khoá; hai luồng gọi cùng lúc là hành vi
+không xác định. Bản Flutter có isolate lo việc này; bên Swift thì không gì chắn sẵn cả.
+
+**Trình phát: mỗi phiên nghe đúng MỘT vòng đọc.** `TrinhPhat.chay` đọc trước tối đa hai đoạn,
+xếp nối đuôi vào `AVAudioPlayerNode` nên chuyển đoạn liền mạch, tự sang chương kế. Nhảy đoạn thì tăng `phien` — mọi việc mang số cũ tự bỏ, kể
+cả lời báo "phát xong" của bộ đệm đã xếp. Ba đoạn liền nhau đọc hỏng thì dừng và báo lỗi
+thay vì lặng lẽ lướt hết cả cuốn.
+
+**Bản Swift KHÔNG nối ngữ cảnh** (`TrinhPhat.noiNguCanh = false`), dù engine hỗ trợ và bản
+Flutter bật mặc định (`nguCanhNghe = tuanTu`). Số đo 9,2 → 4,8 Hz ở mục Rust lấy trên trọng số
+v3 CŨ; đo lại với bản 5f2a3e9 trên 40 đoạn Lộc Đỉnh Ký, giọng Kim Cúc, thì nối ngữ cảnh làm số
+đoạn chạm trần 24 giây (lặp chữ, kéo dài, cụt đuôi) tăng từ 3 lên 6, và 7 đoạn dài hơn chính
+nó lúc không nối trên 30%. Người nghe nhận ra ngay. Bản Flutter nhiều khả năng dính y hệt —
+chưa đo bên ấy.
+
+**Đoạn chạm trần luôn được đọc lại**, kể cả khi tắt kiểm âm: bản dài đúng 300 khung
+(`KetQuaDoc.chamTran`) chắc chắn hỏng, mà biết được chỉ bằng đếm mẫu. Trên 40 đoạn trên: còn 0
+đoạn chạm trần, tốn thêm 3 lượt đọc. Đọc lại bằng hạt giống có hậu tố `|lần N` như Flutter.
+
+**Kiểm âm lúc nghe** (`CaiDat.kiemAm`, mặc định tắt) đi đúng đường của `_docCoSoi` bên
+Flutter: wav2vec2 qua cổng `kiem_am_*` (ghi tạm WAV 16 bit vì cổng nhận đường dẫn), so với
+`AmTietChu.dem` — bản dịch `am_tiet_chu.dart` — trong dải 100–110%, đọc lại tối đa 2 lần. Hai
+bản đếm âm tiết phải ra cùng con số; soi bằng `ios-native/tool/soi-am-tiet.sh sach.epub` (đo
+267.603 đoạn trên bốn cuốn: khớp hết).
+
+**Lệnh màn khoá nối đúng một lần**, trong hàm dựng của `TrinhPhat`. `addTarget` cộng dồn, nên
+nối trong `.task` của một view là sau N lần mở view, bấm "bài sau" nhảy N đoạn.
+
+**`AVAudioEngine` bị hệ thống dừng hẳn khi đổi tai nghe hay sau cuộc gọi**, và không tự chạy
+lại. `Loa` bắt `AVAudioEngineConfigurationChange` và tin ngắt của `AVAudioSession`.
+
+**Thư viện: mỗi cuốn một file** (`thuvien/<id>.json`), thứ tự ở `thutu.json`, chỗ đang nghe ở
+`tiendo.json`. Bản 2.0.0a dồn tất vào một `kho.json`: đọc hỏng là mất cả thư viện (rồi lần
+nhập sau ghi đè lên), và lưu tiến trình là ghi lại chữ của mọi cuốn. `kho.json` cũ được tự
+chuyển sang lúc mở app; đọc không được thì cất sang `kho.hong-*.json` chứ không xoá.
 
 **Bản máy ảo phải loại `x86_64`.** Thư viện Rust chỉ dựng lát arm64 cho simulator, nên thiếu
 `EXCLUDED_ARCHS[sdk=iphonesimulator*]` thì bản máy ảo chết ở bước liên kết với một đống
@@ -868,6 +923,14 @@ dựng lại thư viện.
 **Bung ZIP phải ghi thẳng ra đĩa.** Gói v2 có hai file ~190 MB và ~298 MB sau khi bung; cấp
 phát nguyên khối trong RAM thì iOS giết app, mà nhìn ra ngoài chỉ thấy "v2 không tải được".
 `Zip.ruotRaDia` đẩy từng mẩu 1 MB qua `compression_stream` nên bộ nhớ có trần cố định.
+
+**Lượt FINALIZE của `compression_stream` phải gọi tới khi nó báo END.** Nó nuốt hết đầu vào,
+đầu ra còn chỗ, trả OK — mà vẫn giữ phần chưa nhả (theo khối 64 KB). Bản 2.0.0a dừng đúng
+ở đó nên bốn trên mười một file của gói v3 bị cụt đuôi: ONNX hỏng mà file vẫn tồn tại, nên
+gói vẫn hiện "Đã có". Giờ cỡ ghi ra được đối chiếu với cỡ gốc trong ZIP, gói v3 soi SHA-256,
+và gói bung vào thư mục nháp rồi mới dời vào chỗ. Gói nén chỉ tính là đã cài khi có file dấu
+`.bung-xong-<tên gói>` — máy đã tải bằng bản cũ không có dấu ấy nên được tải lại cho đúng.
+Kiểm bộ bung bằng cách so với `unzip`: phải giống từng byte.
 
 **Nghe nền cần `UIBackgroundModes: audio` trong Info.plist.** Đặt đúng `AVAudioSession`
 category `.playback` là CHƯA đủ — thiếu khai báo thì iOS cắt tiếng ngay lúc app rời tiền
@@ -894,10 +957,32 @@ xcrun simctl launch --terminate-running-process <udid> app.carrot4127.ursaminor5
 xcrun simctl io <udid> screenshot ra.png      # kèm SIMCTL_CHILD_TAB=0..3
 ```
 
+### Target Mac (`SachLuoiMac`)
+
+Cùng mã Swift, dựng cho Mac. Khác bản iOS ở ba chỗ: liên kết thẳng
+`native/vieneu/target/aarch64-apple-darwin/release/libsachnoi_vieneu.a` (xcframework chỉ có
+lát iOS — dựng bằng `./dung-native-apple.sh macos`), nhúng `libonnxruntime.dylib` vào
+`Contents/Frameworks`, và ký ad-hoc.
+
+```bash
+cd ios-native && xcodebuild -project SachLuoi.xcodeproj -scheme SachLuoiMac -configuration Release \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath buildmac build
+```
+
+Hai cạm bẫy, cả hai đều hỏng lặng lẽ:
+
+- **`ORT_DYLIB_PATH` phải đặt trong `SachLuoiApp.init`**, trước mọi thứ. `ort` tìm dylib cạnh
+  file thực thi (`Contents/MacOS`), không phải ở `Frameworks`; không thấy là thư viện Rust
+  (`panic = "abort"`) giết cả app không một dòng log — mà màn Cài đặt hỏi phiên bản ONNX
+  Runtime mỗi lần vẽ, nên chỉ cần mở tab ấy.
+- **Bản Mac không có hộp cát**, nên `Documents` và `Application Support` là của cả người
+  dùng. `ThuMuc` dồn mọi thứ vào `~/Library/Application Support/<mã gói>/`; iOS giữ chỗ cũ.
+
 ### Còn dở
 
-Chọn engine trong Cài đặt mới đổi chữ, chưa đổi engine thật (luôn dùng v3). Kiểm âm mới tải
-được chứ chưa chạy. Xuất file chưa làm. Nhân bản giọng chưa có.
+Chọn engine trong Cài đặt mới đổi chữ, chưa đổi engine thật (luôn dùng v3). Xuất file chưa
+làm. Nhân bản giọng chưa có. "Dọn lại sách" và
+nút xuất file trên thẻ sách mới là nút, chưa làm gì.
 
 ### Tay cầm chơi game
 
@@ -972,7 +1057,8 @@ Máy khác NDK hoặc khác phiên bản thì phải sửa file này trước kh
 đặt `IPHONEOS_DEPLOYMENT_TARGET` / `MACOSX_DEPLOYMENT_TARGET`, nhưng cargo không chạy lại
 build script khi chỉ đổi biến môi trường (`llama-cpp-sys-2` không khai
 `rerun-if-env-changed`), và cmake thì nhớ mức cũ trong `CMakeCache.txt`. Hai thứ cộng lại:
-sửa con số mà không xoá `target/<target>/release/build/llama-cpp-sys-2-*` thì **không có gì
+sửa con số mà không xoá `target/<target>/release/build/llama-cpp-sys-2-*` (và
+`mp3lame-sys-*`, dựng LAME bằng autotools, dính đúng bẫy ấy) thì **không có gì
 đổi cả**. Script tự xoá rồi (`xoa_cache_llama`), đừng bỏ bước ấy đi cho nhanh.
 
 Lỗi này lọt rất êm: các file `.o` của llama.cpp mang `LC_BUILD_VERSION` đòi iOS 26.5, trình

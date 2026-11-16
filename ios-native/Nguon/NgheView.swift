@@ -11,8 +11,9 @@ struct NgheView: View {
   @Environment(KhoSach.self) private var kho
   @Environment(\.horizontalSizeClass) private var beNgang
   @State private var chuongChon: Chuong.ID?
+  private var phat: TrinhPhat { .chung }
 
-  private var sach: Sach? { kho.dangMo ?? kho.sach.first }
+  private var sach: Sach? { kho.dangMo }
 
   /// KHÔNG lùi về chương đầu khi chưa chọn gì.
   ///
@@ -20,9 +21,15 @@ struct NgheView: View {
   /// lại (màn ngoài, máy gập lại) sẽ hiện thẳng ngăn nội dung — danh sách
   /// chương bị đẩy ra sau, phải vuốt từ mép trái mới thấy. Mail làm ngược lại:
   /// gập lại thì thấy danh sách trước, chạm vào mới mở ra đọc.
-  private var chuong: Chuong? {
-    guard let sach else { return nil }
-    return sach.chuong.first { $0.id == chuongChon }
+  private var chuong: (chiSo: Int, chuong: Chuong)? {
+    guard let sach, let i = sach.chuong.firstIndex(where: { $0.id == chuongChon }) else { return nil }
+    return (i, sach.chuong[i])
+  }
+
+  /// Chương đang nghe dở, để màn rộng mở sẵn đúng chỗ ấy.
+  private var chuongNgheDo: Chuong.ID? {
+    guard let sach, !sach.chuong.isEmpty else { return nil }
+    return sach.chuong[sach.viTri(sach.doanDang).chuong].id
   }
 
   var body: some View {
@@ -46,7 +53,9 @@ struct NgheView: View {
         // cuộn nằm đó trông như của hệ thống chứ không phải của danh sách.
         .contentMargins(.trailing, 14, for: .scrollIndicators)
         .navigationTitle(sach.ten)
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
       } else {
         ContentUnavailableView(
           "Chưa có sách",
@@ -56,7 +65,7 @@ struct NgheView: View {
       }
     } detail: {
       if let sach, let chuong {
-        KhungDoc(sach: sach, chuong: chuong)
+        KhungDoc(sach: sach, chuong: chuong.chuong, chiSo: chuong.chiSo)
       } else if sach != nil {
         ContentUnavailableView(
           "Chọn một chương",
@@ -69,12 +78,21 @@ struct NgheView: View {
           description: Text("Chọn một cuốn trong Thư viện để bắt đầu nghe."))
       }
     }
-    // Màn rộng (mở máy ra) thì chọn sẵn chương đầu cho ngăn nội dung có cái
-    // hiện. Màn hẹp thì cố ý để trống, nếu không split view lại nhảy thẳng vào
-    // phần đọc.
+    // Màn rộng (mở máy ra) thì chọn sẵn chương đang nghe dở cho ngăn nội dung
+    // có cái hiện. Màn hẹp thì cố ý để trống, nếu không split view lại nhảy
+    // thẳng vào phần đọc.
     .onChange(of: beNgang, initial: true) { _, moi in
-      if moi == .regular, chuongChon == nil { chuongChon = sach?.chuong.first?.id }
+      if moi == .regular, chuongChon == nil { chuongChon = chuongNgheDo }
       if moi == .compact, chuong == nil { chuongChon = nil }
+    }
+    // Đổi sách thì bỏ chương của cuốn cũ.
+    .onChange(of: kho.dangMoId) { _, _ in
+      chuongChon = beNgang == .regular ? chuongNgheDo : nil
+    }
+    // Trình phát tự sang chương kế: khung đọc đi theo.
+    .onChange(of: phat.chuongDangId) { _, moi in
+      guard let moi, phat.sachId == sach?.id, chuongChon != nil, chuongChon != moi else { return }
+      chuongChon = moi
     }
   }
 }
@@ -83,59 +101,71 @@ struct NgheView: View {
 struct KhungDoc: View {
   let sach: Sach
   let chuong: Chuong
+  let chiSo: Int
 
-  @State private var tocDo = 1.0
   private var phat: TrinhPhat { .chung }
 
-  var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 14) {
-        Text("Chương \(chuong.so): \(chuong.ten)")
-          .font(.title2.weight(.bold))
-          .padding(.bottom, 4)
+  /// Đoạn đang đọc, chỉ khi trình phát đang ở đúng chương này.
+  private var doanDang: Int? {
+    phat.sachId == sach.id && phat.chiSoChuong == chiSo ? phat.doanDang : nil
+  }
 
-        ForEach(chuong.doan.indices, id: \.self) { i in
-          let doanDang = phat.doanDang
-          Text(chuong.doan[i].hien)
-            .font(.system(size: 18))
-            .lineSpacing(7)
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-              if i == doanDang {
-                RoundedRectangle(cornerRadius: 12)
-                  .fill(Sac.chinh.opacity(0.18))
-                  .overlay(alignment: .leading) {
-                    Rectangle().fill(Sac.chinh).frame(width: 3)
-                  }
-                  .clipShape(.rect(cornerRadius: 12))
+  var body: some View {
+    ScrollViewReader { cuon in
+      ScrollView {
+        // Lazy: một chương convert từ web có thể dài hàng nghìn đoạn.
+        LazyVStack(alignment: .leading, spacing: 14) {
+          // Sách nhập trước khi có đoạn tiêu đề thì vẫn hiện tên chương ở đây.
+          if chuong.doan.first?.tieuDe != true {
+            Text("Chương \(chuong.so): \(chuong.ten)")
+              .font(.title2.weight(.bold))
+              .padding(.bottom, 4)
+          }
+
+          ForEach(chuong.doan.indices, id: \.self) { i in
+            let d = chuong.doan[i]
+            Text(d.hien)
+              .font(d.tieuDe ? .title2.weight(.bold) : .system(size: 18))
+              .lineSpacing(7)
+              .padding(14)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background {
+                if i == doanDang {
+                  RoundedRectangle(cornerRadius: 12)
+                    .fill(Sac.chinh.opacity(0.18))
+                    .overlay(alignment: .leading) {
+                      Rectangle().fill(Sac.chinh).frame(width: 3)
+                    }
+                    .clipShape(.rect(cornerRadius: 12))
+                }
               }
-            }
-            .contentShape(.rect)
-            .onTapGesture { phat.nhay(i) }
+              .contentShape(.rect)
+              .onTapGesture { phat.nhay(i) }
+              .id(i)
+          }
         }
+        // Trần bề ngang cho dòng chữ: dòng quá dài thì mắt nhảy dòng.
+        .frame(maxWidth: 700)
+        .frame(maxWidth: .infinity)
+        .padding(20)
       }
-      // Trần bề ngang cho dòng chữ: dòng quá dài thì mắt nhảy dòng.
-      .frame(maxWidth: 700)
-      .frame(maxWidth: .infinity)
-      .padding(20)
+      .onChange(of: doanDang, initial: true) { _, moi in
+        guard let moi else { return }
+        withAnimation { cuon.scrollTo(moi, anchor: .center) }
+      }
     }
     .background(NenUngDung())
     .navigationTitle(sach.ten)
+    #if os(iOS)
     .navigationBarTitleDisplayMode(.inline)
+    #endif
     .safeAreaInset(edge: .bottom) {
-      ThanhPhat(tocDo: $tocDo, soDoan: chuong.doan.count, tong: chuong.thoiLuong)
+      ThanhPhat(soDoan: chuong.doan.count, doanDang: doanDang ?? 0, tong: chuong.thoiLuong)
     }
     .onChange(of: chuong.id, initial: true) { _, _ in
-      phat.nap(chuong)
-      phat.capNhatManKhoa(sach: sach.ten, chuong: "Chương \(chuong.so): \(chuong.ten)")
+      phat.chon(sach, chuong: chiSo)
     }
-    .onChange(of: phat.dangPhat) { _, _ in
-      phat.capNhatManKhoa(sach: sach.ten, chuong: "Chương \(chuong.so): \(chuong.ten)")
-    }
-    .task { phat.noiDieuKhienNgoai() }
   }
-
 }
 
 /// Thanh điều khiển phát, gắn vào safe area đáy.
@@ -144,20 +174,36 @@ struct KhungDoc: View {
 /// biết chừa chỗ, mục cuối không bao giờ nằm khuất dưới thanh — đúng cái lỗi
 /// bản Flutter phải chữa bằng tay bằng cách truyền lề xuống từng trang.
 struct ThanhPhat: View {
-  @Binding var tocDo: Double
   let soDoan: Int
+  let doanDang: Int
   let tong: TimeInterval
   private var phat: TrinhPhat { .chung }
 
   var body: some View {
+    @Bindable var cd = CaiDat.chung
     VStack(spacing: 8) {
-      ProgressView(value: Double(phat.doanDang + 1), total: Double(max(soDoan, 1)))
+      // Lỗi phải HIỆN RA: bản trước ghi vào `loi` mà không chỗ nào đọc, nên
+      // chưa tải mô hình thì bấm phát chỉ thấy nút bật rồi tắt.
+      if let loi = phat.loi {
+        HStack(alignment: .top) {
+          Label(loi, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.red)
+          Spacer()
+          Button("Đóng", systemImage: "xmark") { phat.loi = nil }
+            .labelStyle(.iconOnly)
+            .font(.caption)
+        }
+      }
+
+      ProgressView(value: Double(min(doanDang + 1, max(soDoan, 1))), total: Double(max(soDoan, 1)))
         .tint(Sac.chinh)
 
       HStack {
-        Text(phat.dangTongHop ? "Đang đọc…" : " ")
+        Text(phat.dangTongHop && phat.dangPhat ? "Đang đọc…" : " ")
+        HenGioConLai()
         Spacer()
-        Text("Đoạn \(phat.doanDang + 1)/\(max(soDoan, 1))")
+        Text("Đoạn \(min(doanDang + 1, max(soDoan, 1)))/\(max(soDoan, 1))")
         Spacer()
         Text(tong.dangGio).monospacedDigit()
       }
@@ -165,12 +211,24 @@ struct ThanhPhat: View {
       .foregroundStyle(.secondary)
 
       HStack(spacing: 22) {
-        Menu("\(tocDo, specifier: "%.2g")×") {
-          ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { t in
-            Button("\(t, specifier: "%.2g")×") { tocDo = t }
-          }
+        // Tốc độ: thanh trượt nhỏ ở đúng chỗ nút chọn tốc độ cũ, 0,70–2,00×,
+        // bước 0,05. Áp lúc phát (đổi nhịp giữ cao độ) nên kéo tới đâu nghe
+        // thấy ngay tới đó, không đọc lại gì.
+        HStack(spacing: 6) {
+          // Làm tròn bước 0,05 trong binding chứ không dùng `step:` — trên Mac
+          // `step` vẽ 27 vạch chấm dưới một thanh chỉ rộng 96 điểm.
+          Slider(value: Binding(get: { cd.tocDo },
+                                set: { cd.tocDo = ($0 * 20).rounded() / 20 }),
+                 in: CaiDat.khoangTocDo)
+            .controlSize(.small)
+            .frame(width: 96)
+            .accessibilityLabel("Tốc độ đọc")
+            .accessibilityValue(Self.tocDoChu(cd.tocDo))
+          Text(Self.tocDoChu(cd.tocDo))
+            .font(.caption.weight(.medium))
+            .monospacedDigit()
+            .fixedSize()
         }
-        .font(.subheadline.weight(.medium))
 
         Spacer()
 
@@ -178,9 +236,10 @@ struct ThanhPhat: View {
           phat.nhay(phat.doanDang - 1)
         }
         .labelStyle(.iconOnly)
+        .buttonBorderShape(.circle)
         Button(phat.dangPhat ? "Tạm dừng" : "Phát",
                systemImage: phat.dangPhat ? "pause.fill" : "play.fill") {
-          if phat.dangPhat { phat.dungHan() } else { phat.batDau(tu: phat.doanDang) }
+          if phat.dangPhat { phat.tamDung() } else { phat.phat() }
         }
         .labelStyle(.iconOnly)
         .font(.title2)
@@ -190,22 +249,63 @@ struct ThanhPhat: View {
           phat.nhay(phat.doanDang + 1)
         }
         .labelStyle(.iconOnly)
+        .buttonBorderShape(.circle)
 
         Spacer()
 
         Menu("Thêm", systemImage: "ellipsis") {
-          Button("Hẹn giờ tắt", systemImage: "moon.zzz") {}
-          Button("Kiểm âm trước khi phát", systemImage: "checkmark.circle") {}
+          Picker(selection: Binding(get: { phat.henGio }, set: { phat.datHenGio($0) })) {
+            Text("Tắt").tag(TrinhPhat.HenGio.tat)
+            ForEach([15, 30, 45, 60, 90], id: \.self) { p in
+              Text("\(p) phút").tag(TrinhPhat.HenGio.phut(p))
+            }
+            Text("Hết chương này").tag(TrinhPhat.HenGio.cuoiChuong)
+          } label: {
+            Label("Hẹn giờ tắt", systemImage: "moon.zzz")
+          }
+          .pickerStyle(.menu)
+
+          Toggle(isOn: $cd.kiemAm) {
+            Label("Kiểm âm trước khi phát", systemImage: "checkmark.circle")
+          }
         }
         .labelStyle(.iconOnly)
+        .menuIndicator(.hidden)
+        .buttonBorderShape(.circle)
+        // Menu dựng lại nhãn theo `labelStyle` của chính nó, nên các mục bên
+        // trong vẫn có chữ.
       }
       .font(.title3)
-      .buttonBorderShape(.circle)
     }
     .padding(.horizontal, 20)
     .padding(.vertical, 12)
     // Nền kính của hệ thống, không tự pha màu: nó tự lo tương phản và tự nhạt
     // đi khi người dùng bật giảm trong suốt.
     .background(.bar)
+  }
+
+  /// "1,25×" — dấu phẩy thập phân như mọi con số khác trong app.
+  static func tocDoChu(_ v: Double) -> String {
+    String(format: "%.2f×", v).replacingOccurrences(of: ".", with: ",")
+  }
+}
+
+/// Hẹn giờ tắt đang chạy: đếm ngược từng giây, hoặc "hết chương".
+struct HenGioConLai: View {
+  private var phat: TrinhPhat { .chung }
+
+  var body: some View {
+    switch phat.henGio {
+    case .tat:
+      EmptyView()
+    case .cuoiChuong:
+      Label("Hết chương", systemImage: "moon.zzz.fill")
+    case .phut:
+      TimelineView(.periodic(from: .now, by: 1)) { ngu in
+        let con = max(0, (phat.henDen ?? ngu.date).timeIntervalSince(ngu.date))
+        Label(con.dangGio, systemImage: "moon.zzz.fill")
+          .monospacedDigit()
+      }
+    }
   }
 }

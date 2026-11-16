@@ -1,194 +1,479 @@
 import Foundation
+import MediaPlayer
 
-/// Trình phát: đọc hết chương chứ không dừng sau một đoạn.
+/// Trình phát: đọc hết chương rồi sang chương kế, nhớ chỗ đang nghe.
 ///
-/// Hai điều quan trọng, cả hai đều lấy từ bản Flutter:
+/// Ba điều quan trọng, đều lấy từ bản Flutter:
 ///
-///  * **Đọc trước một đoạn.** Engine chạy khoảng 3× thời gian thực, nên nếu đợi
-///    đoạn này phát xong mới bắt đầu tổng hợp đoạn sau thì cứ hết đoạn là im
-///    mất mấy giây. Tổng hợp đoạn kế NGAY khi đoạn này bắt đầu phát.
-///  * **Mốc để đọc trước là ĐỌC XONG đoạn trước, không phải nghe xong.** Hàng
-///    đợi để ở đây chứ không đẩy hết vào engine: người dùng nhảy đoạn thì phần
-///    chưa gửi đi bỏ ngang, không tốn gì.
+///  * **Đọc trước.** Engine chạy khoảng 3× thời gian thực, nên nếu đợi đoạn này
+///    phát xong mới tổng hợp đoạn sau thì cứ hết đoạn là im mất mấy giây. Vòng
+///    đọc chạy trước tối đa hai đoạn và xếp sẵn vào loa.
+///  * **Mốc để đọc đoạn kế là ĐỌC XONG đoạn trước, không phải nghe xong** — và
+///    chỉ MỘT việc đọc tại một thời điểm. Hàng đợi để ở đây chứ không đẩy hết
+///    vào engine: người dùng nhảy đoạn thì phần chưa gửi bỏ ngang, không tốn gì.
+///  * **KHÔNG nối ngữ cảnh** — xem [noiNguCanh].
+///
+/// Bản trước mỗi lượt `chay` lại sinh một `Task.detached` vừa đọc đoạn này vừa
+/// đọc trước đoạn sau, nên đoạn phát hết sớm hơn việc đọc trước là hai task gọi
+/// engine cùng lúc — xem [Engine]. Giờ mỗi phiên nghe có đúng một vòng đọc.
+@MainActor
 @Observable
 final class TrinhPhat {
   static let chung = TrinhPhat()
 
+  private(set) var sachId: UUID?
+  private(set) var chiSoChuong = 0
   private(set) var doanDang = 0
+  /// Người dùng đang nghe (kể cả lúc chờ đoạn đầu tổng hợp xong).
   private(set) var dangPhat = false
+  /// Đang chờ engine mà loa không còn gì để phát.
   private(set) var dangTongHop = false
-  private(set) var loi: String?
+  var loi: String?
 
-  private var doan: [Doan] = []
-  private var giong = ""
-  /// Mẫu âm của đoạn kế đã tổng hợp sẵn.
-  private var samTruoc: (chiSo: Int, mau: [Float])?
-  /// Tăng mỗi lần người dùng nhảy đoạn — mọi việc mang số cũ bị bỏ.
-  private var phien = 0
+  /// Báo vị trí trên toàn sách mỗi khi sang đoạn mới, để lưu tiến trình.
+  @ObservationIgnored var luuTienDo: ((UUID, Int) -> Void)?
 
-  func nap(_ chuong: Chuong) {
-    dung()
-    doan = chuong.doan
-    doanDang = 0
-    samTruoc = nil
+  @ObservationIgnored private var sach: Sach?
+  @ObservationIgnored private var dauChuong: [Int] = []
+  @ObservationIgnored private var viec: Task<Void, Never>?
+  /// Tăng mỗi lần bắt đầu lại — mọi việc mang số cũ tự bỏ.
+  @ObservationIgnored private var phien = 0
+  /// Những đoạn đã xếp vào loa mà chưa phát xong, theo thứ tự.
+  @ObservationIgnored private var hang: [(chuong: Int, doan: Int)] = []
+  @ObservationIgnored private var choCho: CheckedContinuation<Void, Never>?
+  /// Vòng đọc đã đi hết sách.
+  @ObservationIgnored private var hetSach = false
+
+  /// Số đoạn tối đa xếp sẵn trong loa: một đang phát, một chờ.
+  private let tranHang = 2
+
+  /// Nối mã đuôi đoạn trước làm ngữ cảnh cho đoạn sau — TẮT, vì làm đọc lặp.
+  ///
+  /// Engine hỗ trợ (`vieneu_duoi`) và bản Flutter bật mặc định. Nhưng số đo của
+  /// nó (cao độ giữa các đoạn 9,2 → 4,8 Hz) lấy trên trọng số v3 CŨ. Đo lại với
+  /// bản 5f2a3e9 trên 40 đoạn liền nhau của Lộc Đỉnh Ký, giọng Kim Cúc:
+  ///
+  ///                                     không nối   có nối
+  ///   đoạn chạm trần 24 giây (lặp, cụt)         3        6
+  ///   đoạn dài hơn 1,35× nhịp trung vị          4        6
+  ///   đoạn dài hơn chính nó khi không nối >30%  —        7
+  ///
+  /// Người nghe nói thẳng: đọc lặp và kéo dài hơn hẳn từ khi bật. Bật lại chỉ
+  /// khi đã đo lại trên trọng số mới mà thấy hết lặp.
+  private let noiNguCanh = false
+
+  /// Đọc lại tối đa mấy lần — 2 như lúc nghe bên Flutter (`_soiNgheDocLai`):
+  /// mỗi lượt đọc lại ăn thẳng vào quỹ thời gian đọc trước.
+  private let soLanDocLai = 2
+  /// Bao nhiêu đoạn liền nhau đọc hỏng thì thôi. Một đoạn hỏng thì bỏ qua là
+  /// đúng (đoạn rác lọt bộ lọc), nhưng lỗi kéo dài — thiếu giọng, mô hình hỏng —
+  /// mà cứ bỏ qua thì trình phát lặng lẽ lướt hết cả cuốn.
+  private let tranHong = 3
+
+  var chuongDangId: Chuong.ID? {
+    guard let sach, sach.chuong.indices.contains(chiSoChuong) else { return nil }
+    return sach.chuong[chiSoChuong].id
   }
 
-  func batDau(tu chiSo: Int) {
-    guard chiSo >= 0, chiSo < doan.count else { return }
-    phien += 1
-    samTruoc = nil
-    doanDang = chiSo
-    dangPhat = true
-    chay(phien)
+  private init() {
+    noiDieuKhienNgoai()
+    Loa.chung.datTocDo(CaiDat.chung.tocDo)
+    Loa.chung.khiBiNgat = { [weak self] in self?.tamDung() }
+    Loa.chung.khiDuocTiep = { [weak self] in self?.phat() }
   }
 
-  func dungHan() {
+  // MARK: - Điều khiển
+
+  /// Khung đọc đang hiện chương [chuong] của [sach].
+  ///
+  /// Trình phát tự sang chương kế thì khung đọc đổi theo rồi gọi lại đây với
+  /// đúng chương đang phát — khi ấy không làm gì, nếu không thì chính việc tự
+  /// sang chương sẽ tự dừng nó.
+  func chon(_ sach: Sach, chuong: Int) {
+    if sachId == sach.id, chiSoChuong == chuong { return }
+    let dangNghe = dangPhat && sachId == sach.id
     dung()
     dangPhat = false
+    if sachId != sach.id { loi = nil }
+    self.sach = sach
+    sachId = sach.id
+    dauChuong = sach.dauChuong
+    chiSoChuong = chuong
+    // Chỗ nghe dở nằm trong chương này thì mở ra đúng chỗ ấy — đây là nút
+    // "Nghe tiếp" của thẻ sách.
+    let vt = sach.viTri(sach.doanDang)
+    doanDang = vt.chuong == chuong ? vt.doan : 0
+    capNhatManKhoa()
+    // Đang nghe mà chọn chương khác cùng cuốn thì nghe luôn chương ấy.
+    if dangNghe { khoiChay(chuong: chuong, doan: doanDang) }
   }
 
-  /// Người dùng đổi giọng: bỏ bản đã đọc trước và đọc lại đoạn đang nghe.
-  func doiGiong() {
-    let dangChay = dangPhat
-    let cho = doanDang
-    dung()
-    giong = ""
-    doanDang = cho
-    if dangChay { batDau(tu: cho) }
+  func phat() {
+    guard sach != nil else { return }
+    // Còn hàng đã xếp (vừa tạm dừng) thì nghe tiếp đúng chỗ ấy.
+    if viec != nil, !hang.isEmpty {
+      do {
+        try Loa.chung.phat()
+        dangPhat = true
+        capNhatManKhoa()
+      } catch {
+        loi = "Không mở được âm thanh: \(error.localizedDescription)"
+      }
+      return
+    }
+    if viec != nil { dangPhat = true; return }
+    khoiChay(chuong: chiSoChuong, doan: doanDang)
   }
 
+  func tamDung() {
+    dangPhat = false
+    Loa.chung.tamDung()
+    capNhatManKhoa()
+  }
+
+  /// Nhảy tới đoạn [chiSo] của chương đang mở. Vượt đầu/cuối chương thì sang
+  /// chương liền kề.
   func nhay(_ chiSo: Int) {
-    guard chiSo >= 0, chiSo < doan.count else { return }
-    let dangChay = dangPhat
-    dung()
-    doanDang = chiSo
-    if dangChay { batDau(tu: chiSo) }
+    guard let sach else { return }
+    var c = chiSoChuong, d = chiSo
+    if d < 0 {
+      guard c > 0 else { return }
+      c -= 1
+      d = max(0, sach.chuong[c].doan.count - 1)
+    } else if d >= sach.chuong[c].doan.count {
+      guard c + 1 < sach.chuong.count else { return }
+      c += 1
+      d = 0
+    }
+    if dangPhat {
+      khoiChay(chuong: c, doan: d)
+    } else {
+      dung()
+      chiSoChuong = c
+      doanDang = d
+      baoTienDo()
+    }
   }
+
+  /// Người dùng đổi giọng: bỏ phần đã đọc trước và đọc lại từ đoạn đang nghe.
+  func doiGiong() {
+    if dangPhat { khoiChay(chuong: chiSoChuong, doan: doanDang) } else { dung() }
+  }
+
+  /// Cuốn sách bị xoá khỏi thư viện.
+  func boSach(_ id: UUID) {
+    guard sachId == id else { return }
+    dung()
+    dangPhat = false
+    sach = nil
+    sachId = nil
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+  }
+
+  // MARK: - Vòng đọc
 
   private func dung() {
     phien += 1
-    Loa.chung.dung()
-    samTruoc = nil
+    viec?.cancel()
+    viec = nil
+    hang = []
+    hetSach = false
     dangTongHop = false
+    Loa.chung.xoaHang()
+    choCho?.resume()
+    choCho = nil
   }
 
-  /// Vòng chính: phát đoạn hiện tại, đồng thời tổng hợp đoạn kế.
-  private func chay(_ cua: Int) {
-    guard cua == phien, doanDang < doan.count else {
-      if doanDang >= doan.count { dangPhat = false }
-      return
-    }
-    // Nhảy qua những đoạn không có gì để đọc. Sách đã nhập trước khi có bộ lọc
-    // ở `CatDoan` vẫn còn chúng, nên phải chắn ở đây nữa.
-    var chiSo = doanDang
-    while chiSo < doan.count, !CatDoan.docDuoc(doan[chiSo].doc) { chiSo += 1 }
-    guard chiSo < doan.count else {
-      doanDang = doan.count
-      dangPhat = false
-      return
-    }
-    if chiSo != doanDang { doanDang = chiSo }
-    let van = doan[chiSo].doc
+  private func khoiChay(chuong: Int, doan: Int) {
+    dung()
+    let p = phien
+    chiSoChuong = chuong
+    doanDang = doan
+    dangPhat = true
+    loi = nil
+    capNhatManKhoa()
+    viec = Task { await chay(p, chuong: chuong, doan: doan) }
+  }
 
-    Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self else { return }
-      let may = Engine.chung
-      if !may.sanSang {
-        may.mo()
-        if let l = may.loi {
-          await MainActor.run { self.loi = l; self.dangPhat = false }
+  private func chay(_ p: Int, chuong: Int, doan: Int) async {
+    guard let sach else { return }
+    var c = chuong, d = doan
+    var nguCanh: [Int32] = []
+    var hong = 0
+
+    dangTongHop = true
+    let giongCo: [String]
+    do {
+      giongCo = try await Engine.chung.mo()
+    } catch {
+      guard p == phien else { return }
+      loi = error.localizedDescription
+      dangTongHop = false
+      dangPhat = false
+      viec = nil
+      return
+    }
+
+    while p == phien {
+      // Nhảy qua đoạn không có gì để đọc, và sang chương kế khi hết chương.
+      // Sách đã nhập trước khi có bộ lọc ở `CatDoan` vẫn còn đoạn rỗng.
+      while c < sach.chuong.count,
+            d >= sach.chuong[c].doan.count || !CatDoan.docDuoc(sach.chuong[c].doan[d].doc) {
+        if d >= sach.chuong[c].doan.count {
+          c += 1
+          d = 0
+          nguCanh = []
+        } else {
+          d += 1
+        }
+      }
+      guard c < sach.chuong.count else { break }
+
+      // Giọng người dùng chọn; nếu engine không có thì mới lùi về giọng đầu.
+      let muon = CaiDat.chung.giongChon
+      let giong = giongCo.contains(muon) ? muon : (giongCo.first ?? "")
+      if hang.isEmpty { dangTongHop = true }
+
+      let kq: KetQuaDoc
+      do {
+        kq = try await docCoSoi(sach.chuong[c].doan[d].doc, giong: giong,
+                                nguCanh: noiNguCanh ? nguCanh : [], phien: p)
+      } catch {
+        guard p == phien else { return }
+        hong += 1
+        loi = "Đoạn \(d + 1) chương \(c + 1): \(error.localizedDescription)"
+        if hong >= tranHong {
+          loi = "Dừng vì \(tranHong) đoạn liền nhau không đọc được — \(error.localizedDescription)"
+          dangTongHop = false
+          // Đợi loa phát nốt những gì đã xếp rồi mới coi là dừng.
+          hetSach = true
+          if hang.isEmpty { dangPhat = false; viec = nil; capNhatManKhoa() }
           return
         }
+        nguCanh = []
+        d += 1
+        continue
       }
-      // Giọng người dùng chọn; nếu engine không có thì mới lùi về giọng đầu.
-      let muon = await MainActor.run { CaiDat.chung.giongChon }
-      self.giong = may.giong.contains(muon) ? muon : (may.giong.first ?? "")
+      guard p == phien else { return }
+      hong = 0
+      if loi?.hasPrefix("Đoạn ") == true { loi = nil }
+      nguCanh = kq.duoi
 
-      // Lấy bản đã đọc trước nếu có, không thì tự đọc.
-      var mau: [Float]?
-      if let s = self.samTruoc, s.chiSo == chiSo {
-        mau = s.mau
-      } else {
-        await MainActor.run { self.dangTongHop = true }
-        mau = may.doc(van, giong: self.giong)
-        await MainActor.run { self.dangTongHop = false }
-      }
-      guard cua == self.phien else { return }
-      guard let mau else {
-        // Đọc không được MỘT đoạn thì bỏ nó, sang đoạn kế — dừng hẳn cả chương
-        // vì một đoạn hỏng là chuyện đã gặp: gặp đoạn trắng là nghỉ luôn.
-        await MainActor.run {
-          guard cua == self.phien else { return }
-          self.loi = may.loi
-          self.doanDang += 1
-          self.chay(cua)
+      // Hẹn "hết chương này": đoạn sắp xếp thuộc chương MỚI thì đợi loa phát
+      // xong chương cũ rồi dừng, để đoạn đầu chương mới nằm sẵn trong loa ở
+      // trạng thái tạm dừng — bấm phát là nghe tiếp ngay, không đọc lại.
+      if henGio == .cuoiChuong, (hang.last?.chuong ?? chiSoChuong) != c {
+        while !hang.isEmpty, p == phien {
+          await withCheckedContinuation { choCho = $0 }
         }
+        guard p == phien else { return }
+        datHenGio(.tat)
+        tamDung()
+      }
+
+      // Chờ loa có chỗ: tối đa [tranHang] đoạn xếp sẵn.
+      while hang.count >= tranHang, p == phien {
+        await withCheckedContinuation { choCho = $0 }
+      }
+      guard p == phien else { return }
+
+      let cc = c, dd = d
+      do {
+        try Loa.chung.xep(kq.mau) { [weak self] in self?.xongMot(p) }
+        hang.append((cc, dd))
+        dangTongHop = false
+        if hang.count == 1 { sangDoan(cc, dd) }
+        if dangPhat { try Loa.chung.phat() }
+      } catch {
+        loi = "Không mở được âm thanh: \(error.localizedDescription)"
+        dung()
+        dangPhat = false
         return
       }
+      d += 1
+    }
 
-      await MainActor.run {
-        Loa.chung.phat(mau) { [weak self] in
-          // Phát xong đoạn này thì sang đoạn kế — đây là chỗ bản trước thiếu,
-          // nên nó đọc một đoạn rồi nghỉ.
-          guard let self, cua == self.phien else { return }
-          self.doanDang += 1
-          self.chay(cua)
-        }
-      }
-
-      // Đọc trước đoạn kế NGAY, trong lúc đoạn này đang phát.
-      var ke = chiSo + 1
-      while ke < self.doan.count, !CatDoan.docDuoc(self.doan[ke].doc) { ke += 1 }
-      guard ke < self.doan.count, cua == self.phien else { return }
-      if let m = may.doc(self.doan[ke].doc, giong: self.giong), cua == self.phien {
-        self.samTruoc = (ke, m)
-      }
+    // Vòng đọc hết sách: phát nốt hàng còn lại rồi dừng.
+    guard p == phien else { return }
+    hetSach = true
+    dangTongHop = false
+    if hang.isEmpty {
+      dangPhat = false
+      viec = nil
+      capNhatManKhoa()
     }
   }
-}
 
-// MARK: - Điều khiển ngoài app
+  /// Đọc một đoạn, chọn bản tốt nhất trong tối đa [soLanDocLai] lần đọc lại.
+  ///
+  /// Hai tầng soi, theo giá:
+  ///
+  ///  * **Chạm trần — luôn bật.** Bản chạm trần 24 giây chắc chắn hỏng (lặp
+  ///    chữ, cụt đuôi), mà biết được chỉ bằng cách đếm mẫu, không tốn gì. Đoạn
+  ///    bình thường thì không đọc thêm lượt nào.
+  ///  * **Đếm âm wav2vec2 — khi bật "Kiểm tra trước khi phát".** Như
+  ///    `_docCoSoi` của bản Flutter: số âm nghe được phải nằm trong 100–110% số
+  ///    âm tiết văn bản đáng lẽ đọc ra (`AmTietChu.dem`). Bộ kiểm không chạy được
+  ///    (chưa tải, lỗi) thì coi là "chưa kiểm" chứ không phải trượt.
+  ///
+  /// Không đạt lần nào thì phát bản lệch ít nhất; bản chạm trần luôn xếp sau
+  /// mọi bản không chạm.
+  private func docCoSoi(_ van: String, giong: String, nguCanh: [Int32],
+                        phien p: Int) async throws -> KetQuaDoc {
+    var soi = CaiDat.chung.kiemAm
+    var tot: (kq: KetQuaDoc, diem: Double)?
+    for lan in 0...soLanDocLai {
+      guard p == phien else { break }
+      let kq = try await Engine.chung.doc(van, giong: giong, nguCanh: nguCanh, lanThu: lan)
+      let diem: Double
+      if kq.chamTran {
+        diem = 1000
+      } else if soi {
+        do {
+          let soAm = try await Engine.chung.demAm(kq.mau)
+          let soTu = AmTietChu.dem(van)
+          let tiLe = soTu == 0 ? (soAm == 0 ? 1 : 0) : Double(soAm) / Double(soTu)
+          let dat = soTu == 0 ? soAm == 0 : soAm > 0 && tiLe >= 1.0 && tiLe <= 1.1
+          if dat { return kq }
+          diem = abs(tiLe - 1)
+        } catch {
+          soi = false
+          if !daBaoKiemAm {
+            daBaoKiemAm = true
+            loi = "Kiểm âm chưa chạy: \(error.localizedDescription)"
+          }
+          return kq
+        }
+      } else {
+        return kq
+      }
+      if tot == nil || diem < tot!.diem { tot = (kq, diem) }
+    }
+    guard let tot else { throw CancellationError() }
+    return tot.kq
+  }
 
-import MediaPlayer
+  /// Chỉ báo lỗi bộ kiểm âm một lần mỗi phiên, không thì mỗi đoạn một lần.
+  @ObservationIgnored private var daBaoKiemAm = false
 
-extension TrinhPhat {
+  // MARK: - Hẹn giờ tắt
+
+  enum HenGio: Hashable {
+    case tat
+    case phut(Int)
+    case cuoiChuong
+  }
+
+  private(set) var henGio: HenGio = .tat
+  /// Lúc sẽ tự dừng, khi hẹn theo phút.
+  private(set) var henDen: Date?
+  @ObservationIgnored private var viecHen: Task<Void, Never>?
+
+  func datHenGio(_ h: HenGio) {
+    viecHen?.cancel()
+    viecHen = nil
+    henGio = h
+    henDen = nil
+    guard case .phut(let p) = h else { return }
+    henDen = Date().addingTimeInterval(TimeInterval(p * 60))
+    viecHen = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(p * 60))
+      guard !Task.isCancelled, let self else { return }
+      self.tamDung()
+      self.henGio = .tat
+      self.henDen = nil
+    }
+  }
+
+  /// Loa phát xong đoạn đầu hàng.
+  private func xongMot(_ p: Int) {
+    guard p == phien, !hang.isEmpty else { return }
+    hang.removeFirst()
+    if let dau = hang.first {
+      sangDoan(dau.chuong, dau.doan)
+    } else if hetSach {
+      dangPhat = false
+      viec = nil
+      capNhatManKhoa()
+    } else {
+      // Engine chưa kịp: loa im trong lúc chờ đoạn kế.
+      dangTongHop = true
+    }
+    choCho?.resume()
+    choCho = nil
+  }
+
+  private func sangDoan(_ c: Int, _ d: Int) {
+    chiSoChuong = c
+    doanDang = d
+    baoTienDo()
+    capNhatManKhoa()
+  }
+
+  private func baoTienDo() {
+    guard let sachId, dauChuong.indices.contains(chiSoChuong) else { return }
+    luuTienDo?(sachId, dauChuong[chiSoChuong] + doanDang)
+  }
+
+  // MARK: - Điều khiển ngoài app
+
   /// Nối nút trên màn khoá, tai nghe và Trung tâm điều khiển.
   ///
-  /// Không chỉ để tiện: app nghe sách mà thoát ra là mất điều khiển thì phải
-  /// mở lại app chỉ để tạm dừng. Màn khoá cũng là chỗ duy nhất thấy đang nghe
-  /// chương nào khi máy đã cất túi.
-  func noiDieuKhienNgoai() {
+  /// Gọi ĐÚNG MỘT LẦN, từ hàm dựng của singleton. Bản trước gọi trong `.task`
+  /// của khung đọc, mà `.task` chạy lại mỗi lần khung hiện ra — `addTarget`
+  /// thì cộng dồn, nên sau N lần mở khung, bấm "bài sau" nhảy N đoạn.
+  private func noiDieuKhienNgoai() {
     let tt = MPRemoteCommandCenter.shared()
     tt.playCommand.addTarget { [weak self] _ in
-      guard let self, !self.dangPhat else { return .commandFailed }
-      self.batDau(tu: self.doanDang)
-      return .success
+      MainActor.assumeIsolated {
+        guard let self, self.sach != nil else { return .commandFailed }
+        self.phat()
+        return .success
+      }
     }
     tt.pauseCommand.addTarget { [weak self] _ in
-      guard let self, self.dangPhat else { return .commandFailed }
-      self.dungHan()
-      return .success
+      MainActor.assumeIsolated {
+        guard let self else { return .commandFailed }
+        self.tamDung()
+        return .success
+      }
+    }
+    tt.togglePlayPauseCommand.addTarget { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self, self.sach != nil else { return .commandFailed }
+        if self.dangPhat { self.tamDung() } else { self.phat() }
+        return .success
+      }
     }
     tt.nextTrackCommand.addTarget { [weak self] _ in
-      guard let self else { return .commandFailed }
-      self.nhay(self.doanDang + 1)
-      return .success
+      MainActor.assumeIsolated {
+        guard let self, self.sach != nil else { return .commandFailed }
+        self.nhay(self.doanDang + 1)
+        return .success
+      }
     }
     tt.previousTrackCommand.addTarget { [weak self] _ in
-      guard let self else { return .commandFailed }
-      self.nhay(self.doanDang - 1)
-      return .success
+      MainActor.assumeIsolated {
+        guard let self, self.sach != nil else { return .commandFailed }
+        self.nhay(self.doanDang - 1)
+        return .success
+      }
     }
   }
 
-  /// Cập nhật thông tin hiện trên màn khoá.
-  func capNhatManKhoa(sach: String, chuong: String) {
-    var tin: [String: Any] = [
-      MPMediaItemPropertyTitle: chuong,
-      MPMediaItemPropertyAlbumTitle: sach,
-      MPNowPlayingInfoPropertyPlaybackRate: dangPhat ? 1.0 : 0.0,
+  /// Thông tin hiện trên màn khoá.
+  private func capNhatManKhoa() {
+    guard let sach, sach.chuong.indices.contains(chiSoChuong) else { return }
+    let c = sach.chuong[chiSoChuong]
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+      MPMediaItemPropertyTitle: "Chương \(c.so): \(c.ten)",
+      MPMediaItemPropertyAlbumTitle: sach.ten,
+      MPNowPlayingInfoPropertyPlaybackRate: dangPhat ? CaiDat.chung.tocDo : 0.0,
+      MPNowPlayingInfoPropertyPlaybackQueueIndex: doanDang,
+      MPNowPlayingInfoPropertyPlaybackQueueCount: c.doan.count,
     ]
-    tin[MPNowPlayingInfoPropertyPlaybackQueueIndex] = doanDang
-    MPNowPlayingInfoCenter.default().nowPlayingInfo = tin
+    #if os(macOS)
+    MPNowPlayingInfoCenter.default().playbackState = dangPhat ? .playing : .paused
+    #endif
   }
 }

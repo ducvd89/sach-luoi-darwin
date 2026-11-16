@@ -39,6 +39,8 @@ struct ThuVienView: View {
       .overlay {
         if kho.dangNhap {
           ProgressView("Đang tách chương…")
+        } else if kho.dangDoc {
+          ProgressView("Đang mở thư viện…")
         } else if kho.sach.isEmpty {
           ContentUnavailableView(
             "Chưa có sách nào",
@@ -78,6 +80,7 @@ struct ThuVienView: View {
 struct TheSach: View {
   @Environment(KhoSach.self) private var kho
   let sach: Sach
+  @State private var hoiXoa = false
 
   var body: some View {
     HStack(alignment: .top, spacing: 14) {
@@ -98,7 +101,7 @@ struct TheSach: View {
 
         HStack(spacing: 10) {
           Button {
-            kho.dangMo = sach
+            kho.dangMoId = sach.id
             kho.tab = 1
           } label: {
             Label(sach.daNghe > 0 && sach.daNghe < 1 ? "Nghe tiếp" : "Nghe",
@@ -107,26 +110,43 @@ struct TheSach: View {
           }
           // Nút kính của hệ thống — không tự vẽ nền nữa, để hệ thống cấp vật
           // liệu thật và tự lo trạng thái bấm, tương phản, giảm trong suốt.
+          //
+          // Hình dạng đặt RIÊNG từng nút, không đặt chung cho cả hàng: nút này
+          // có chữ, mà ép nó vào hình tròn thì trên Mac chữ và nền cam mất
+          // sạch, chỉ còn trơ cái tam giác.
           .buttonStyle(.glassProminent)
+          .buttonBorderShape(.capsule)
 
           Button("Xuất file", systemImage: "square.and.arrow.down") {}
             .labelStyle(.iconOnly)
             .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
 
           Menu {
             Button("Dọn lại sách", systemImage: "wand.and.sparkles") {}
-            Button("Xoá khỏi thư viện", systemImage: "trash", role: .destructive) {}
+            Button("Xoá khỏi thư viện", systemImage: "trash", role: .destructive) { hoiXoa = true }
           } label: {
             Label("Thêm", systemImage: "ellipsis")
               .labelStyle(.iconOnly)
           }
+          // Trên Mac menu tự vẽ thêm mũi tên ▾ bên cạnh, nên vòng kính lệch
+          // sang một bên thay vì ôm lấy dấu ba chấm.
+          .menuIndicator(.hidden)
           .buttonStyle(.glass)
+          .buttonBorderShape(.circle)
         }
-        .buttonBorderShape(.circle)
       }
     }
     .padding(14)
     .background(.background.secondary, in: .rect(cornerRadius: 22))
+    // Xoá không lấy lại được: file sách nằm trong hộp cát của app, bản gốc
+    // người dùng chọn lúc nhập thì app không giữ.
+    .confirmationDialog("Xoá “\(sach.ten)” khỏi thư viện?", isPresented: $hoiXoa,
+                        titleVisibility: .visible) {
+      Button("Xoá", role: .destructive) { kho.xoa(sach) }
+    } message: {
+      Text("Chỗ đang nghe dở cũng mất theo. Muốn nghe lại phải nhập lại file.")
+    }
   }
 }
 

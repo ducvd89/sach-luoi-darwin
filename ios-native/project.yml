@@ -9,6 +9,7 @@ options:
   bundleIdPrefix: app.carrot4127
   deploymentTarget:
     iOS: "26.0"
+    macOS: "26.0"
   createIntermediateGroups: true
 
 settings:
@@ -56,3 +57,55 @@ targets:
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: Accelerate.framework
+
+  # Cùng mã Swift, dựng cho Mac. Khác bản iOS ở ba chỗ: liên kết .a của
+  # aarch64-apple-darwin (xcframework chỉ có lát iOS), nhúng libonnxruntime.dylib
+  # vì bản macOS của `ort` là load-dynamic (SachLuoiApp đặt ORT_DYLIB_PATH),
+  # và ký ad-hoc thay vì hồ sơ iPhone.
+  SachLuoiMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Nguon
+        excludes: [Info.plist]
+      - path: ../app/assets/sea_g2p.bin
+        buildPhase: resources
+      - path: ../app/assets/giong.json
+        buildPhase: resources
+      - path: ../native/vendor/onnxruntime/macos-arm64/libonnxruntime.dylib
+        buildPhase: none
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.carrot4127.sachluoi.mac
+        # Tên ASCII: codesign trên macOS 27 chết với tên file có dấu ("not signed at all").
+        PRODUCT_NAME: SachLuoi
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_CFBundleDisplayName: Sách lười
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.books
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+        ENABLE_APP_SANDBOX: "NO"
+        ENABLE_HARDENED_RUNTIME: "NO"
+        ENABLE_DEBUG_DYLIB: "NO"
+        SWIFT_OBJC_BRIDGING_HEADER: Nguon/Cau.h
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: "YES"
+        OTHER_LDFLAGS: >-
+          $(SRCROOT)/../native/vieneu/target/aarch64-apple-darwin/release/libsachnoi_vieneu.a
+          -lc++ -liconv
+    dependencies:
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: Accelerate.framework
+    postCompileScripts: []
+    postBuildScripts:
+      - name: Chép libonnxruntime
+        script: |
+          mkdir -p "$BUILT_PRODUCTS_DIR/$FRAMEWORKS_FOLDER_PATH"
+          cp -f "$SRCROOT/../native/vendor/onnxruntime/macos-arm64/libonnxruntime.dylib" "$BUILT_PRODUCTS_DIR/$FRAMEWORKS_FOLDER_PATH/"
+          codesign -f -s - "$BUILT_PRODUCTS_DIR/$FRAMEWORKS_FOLDER_PATH/libonnxruntime.dylib"
+        basedOnDependencyAnalysis: false

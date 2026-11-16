@@ -98,6 +98,7 @@ enum Zip {
 
     if m.cachNen == 0 {
       // Để nguyên: chép từng mẩu, vẫn không nạp cả file.
+      guard m.coNen == m.coGoc else { throw LoiZip.hong }
       var i = dau
       while i < dau + m.coNen {
         let n = min(1 << 20, dau + m.coNen - i)
@@ -107,6 +108,10 @@ enum Zip {
       return
     }
     guard m.cachNen == 8 else { throw LoiZip.hong }
+    guard m.coNen > 0 else {
+      guard m.coGoc == 0 else { throw LoiZip.hong }
+      return
+    }
 
     var luong = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 1)!,
                                    dst_size: 0, src_ptr: UnsafePointer<UInt8>(bitPattern: 1)!,
@@ -119,6 +124,11 @@ enum Zip {
     let demRa = UnsafeMutablePointer<UInt8>.allocate(capacity: coRa)
     defer { demRa.deallocate() }
 
+    // Vòng trong chạy tới khi bộ giải nén ĐÒI THÊM ĐẦU VÀO — tức đã nuốt hết
+    // mẩu này VÀ còn chỗ trống ở đầu ra. Bản trước dừng ngay khi nuốt hết đầu
+    // vào, nên lượt cuối mà đúng lúc lấp đầy 1 MB đầu ra thì phần còn lại trong
+    // bộ giải nén bị bỏ, file cụt đuôi mà không báo gì.
+    var daGhi = 0
     var i = dau
     let het = dau + m.coNen
     var xong = false
@@ -131,19 +141,38 @@ enum Zip {
       try manh.withUnsafeBytes { vao in
         luong.src_ptr = vao.bindMemory(to: UInt8.self).baseAddress!
         luong.src_size = nVao
-        repeat {
+        while true {
           luong.dst_ptr = demRa
           luong.dst_size = coRa
           let tt = compression_stream_process(
             &luong, cuoiNguon ? Int32(COMPRESSION_STREAM_FINALIZE.rawValue) : 0)
           let daRa = coRa - luong.dst_size
-          if daRa > 0 { try tep.write(contentsOf: Data(bytes: demRa, count: daRa)) }
-          if tt == COMPRESSION_STATUS_END { xong = true; break }
+          if daRa > 0 {
+            try tep.write(contentsOf: Data(bytes: demRa, count: daRa))
+            daGhi += daRa
+          }
+          if tt == COMPRESSION_STATUS_END { xong = true; return }
           if tt == COMPRESSION_STATUS_ERROR { throw LoiZip.hong }
-        } while luong.src_size > 0
+          if !cuoiNguon {
+            if luong.src_size == 0 && luong.dst_size > 0 { return }
+          } else if daRa == 0 && luong.src_size == 0 {
+            // Đã FINALIZE, không còn gì vào, không ra thêm byte nào mà vẫn
+            // chưa END: luồng nén cụt. Dừng thay vì quay vô tận.
+            throw LoiZip.hong
+          }
+          // Ở lượt FINALIZE thì KHÔNG được dừng chỉ vì đã nuốt hết đầu vào và
+          // đầu ra còn chỗ: bộ giải nén vẫn giữ phần chưa nhả (đo trên gói v3:
+          // nhả theo khối 64 KB), phải gọi tiếp tới khi nó báo END. Bản trước
+          // dừng đúng ở đó nên bốn trên mười một file của gói v3 bị cụt đuôi —
+          // ONNX hỏng mà file vẫn tồn tại, `daCo` vẫn báo "Đã có".
+        }
       }
-      if cuoiNguon { xong = true }
+      // Hết đầu vào, đã báo FINALIZE, mà bộ giải nén vẫn chưa thấy cuối luồng:
+      // dữ liệu nén bị cụt.
+      if cuoiNguon && !xong { throw LoiZip.hong }
     }
+    // Đối chiếu với cỡ gốc khai trong bảng thư mục trung tâm.
+    guard daGhi == m.coGoc else { throw LoiZip.hong }
   }
 
   enum LoiZip: Error { case hong }

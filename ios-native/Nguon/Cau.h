@@ -40,6 +40,28 @@ float *vieneu_synthesize(Engine *handle, const char *text, const char *voice,
                          int ngu_canh_len, int *out_len);
 void vieneu_samples_free(float *data, int len);
 
+// Mã đuôi của đoạn vừa đọc, để làm ngữ cảnh cho đoạn kế. Trỏ vào bộ đệm BÊN
+// TRONG engine: chỉ sống tới lần vieneu_synthesize tiếp theo, và KHÔNG được
+// giải phóng — sao ra ngay.
+const int *vieneu_duoi(const Engine *handle, int *out_len);
+
 char *vieneu_last_error(const Engine *handle);
+
+// --- Kiểm âm wav2vec2 (native/vieneu/src/kiem_am.rs) ---------------------
+//
+// Tiền tố `kiem_am_`, KHÔNG phải `vieneu_` — bản iOS strip symbol theo tiền tố
+// (xem cảnh báo về exported_symbols.txt trong CLAUDE.md).
+
+typedef struct BoKiemAm BoKiemAm;
+
+// Nạp mô hình từ thư mục chứa model_quantized.onnx và phonemes.json. Lỗi thì
+// trả null và ghi thông báo vào *loi (giải phóng bằng vieneu_string_free).
+BoKiemAm *kiem_am_mo(const char *thu_muc, char **loi);
+
+// Nhận dạng một file WAV. Trả JSON {"soAm": n, "amVi": [...]} hoặc
+// {"loi": "..."}; giải phóng bằng vieneu_string_free.
+char *kiem_am_nhan(BoKiemAm *bo, const char *wav, float nhip);
+
+void kiem_am_dong(BoKiemAm *bo);
 
 #endif

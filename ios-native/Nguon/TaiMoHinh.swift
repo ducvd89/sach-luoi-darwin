@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Một gói mô hình trong kho phát hành.
@@ -14,6 +15,10 @@ struct GoiMoHinh: Identifiable, Hashable {
   /// cài xong chưa — bung dở thì thiếu file và lần sau tải lại.
   let canCo: [String]
   let moTa: String
+  /// SHA-256 của gói nén, như `maBam` của bản Flutter. Có thì soi trước khi
+  /// bung: gói tải dở hay bị proxy chèn trang lỗi vẫn là "file ZIP" và vẫn bung
+  /// ra được vài file, rồi engine chết khi nạp với một lỗi chẳng nói lên gì.
+  var maBam: String? = nil
 
   /// File tải thẳng, không qua ZIP. Bộ kiểm âm wav2vec2 đi đường này vì nó chỉ
   /// là hai file rời chứ không đóng gói.
@@ -30,22 +35,41 @@ struct GoiMoHinh: Identifiable, Hashable {
   static let goc =
     "https://github.com/ducvd89/sach-luoi-models/releases/download/v1"
 
+  /// Đã cài xong chưa.
+  ///
+  /// Gói nén phải có thêm DẤU BUNG XONG, ghi sau khi cả gói đã bung đủ, đúng cỡ
+  /// và đã dời vào chỗ. Chỉ hỏi file có tồn tại không thì không đủ: bộ bung của
+  /// 2.0.0a cắt cụt đuôi file (xem `Zip.ruotRaDia`) — trên gói v3 là bốn trên
+  /// mười một file — mà file cụt vẫn "tồn tại". Máy đã tải bằng bản ấy không có
+  /// dấu này, nên gói hiện lại nút tải và được tải lại cho đúng.
   var daCo: Bool {
     let g = Engine.thuMucMoHinh
-    return canCo.allSatisfy {
-      FileManager.default.fileExists(atPath: g.appendingPathComponent($0).path)
+    let fm = FileManager.default
+    if tepRoi.isEmpty, !fm.fileExists(atPath: g.appendingPathComponent(dauBungXong).path) {
+      return false
     }
+    return canCo.allSatisfy { fm.fileExists(atPath: g.appendingPathComponent($0).path) }
   }
+
+  var dauBungXong: String { ".bung-xong-\(tep)" }
 
   /// Thư mục mô hình v3 đặt tên theo revision: bộ cũ không được nhận nhầm là
   /// đã cập nhật, và tải hỏng thì không ghi đè trọng số đang chạy được.
+  /// Danh sách file khớp `goiV3.canCo` của bản Flutter. Bản trước chỉ soi bốn
+  /// file nên một gói bung dở vẫn được coi là "đã có".
   static let v3 = GoiMoHinh(
     id: "v3", ten: "VieNeu v3 Turbo", tep: "vieneu-v3-5f2a3e9.zip", coMB: 146.7,
     canCo: ["\(Engine.tenBanV3)/vieneu_prefill.onnx",
             "\(Engine.tenBanV3)/vieneu_decode_step.onnx",
+            "\(Engine.tenBanV3)/vieneu_acoustic_cached.onnx",
+            "\(Engine.tenBanV3)/vieneu_backbone_shared.data",
+            "\(Engine.tenBanV3)/vieneu_v3_heads.npz",
             "\(Engine.tenBanV3)/config.json",
-            "codec/moss_audio_tokenizer_decode_step.onnx"],
-    moTa: "Chạy thẳng trên máy, không cần mạng. Đọc nhanh hơn tốc độ nghe.")
+            "\(Engine.tenBanV3)/tokenizer.json",
+            "codec/moss_audio_tokenizer_decode_step.onnx",
+            "codec/moss_audio_tokenizer_decode_shared.data"],
+    moTa: "Chạy thẳng trên máy, không cần mạng. Đọc nhanh hơn tốc độ nghe.",
+    maBam: "d228baf1439b3672f84a9508f453808ff0e7e170993186223d51081816989337")
 
   static let v2 = GoiMoHinh(
     id: "v2", ten: "VieNeu v2", tep: "vieneu-v2.zip", coMB: 478.2,
@@ -96,6 +120,10 @@ final class TaiMoHinh {
   private(set) var lanDoi = 0
 
   private var viec: Task<Void, Never>?
+  /// Tăng mỗi lần tải hay huỷ. Việc đã huỷ chạy nốt phần dọn dẹp của nó SAU khi
+  /// người dùng bấm tải gói khác, và bản trước để nó xoá trạng thái của việc mới
+  /// (`dangTai = nil` giữa lúc gói mới đang về).
+  private var luot = 0
 
   var phan: Double {
     tongByte > 0 ? min(1, Double(daTaiByte) / Double(tongByte)) : 0
@@ -110,6 +138,7 @@ final class TaiMoHinh {
   }
 
   func huy() {
+    luot += 1
     viec?.cancel()
     viec = nil
     dangTai = nil
@@ -118,6 +147,8 @@ final class TaiMoHinh {
 
   func tai(_ goi: GoiMoHinh) {
     guard dangTai == nil, !goi.daCo else { return }
+    luot += 1
+    let cua = luot
     dangTai = goi.id
     daTaiByte = 0
     tongByte = Int64(goi.coMB * 1_048_576)
@@ -132,15 +163,16 @@ final class TaiMoHinh {
         } else {
           try await self.taiRoi(goi)
         }
-        if !Task.isCancelled {
-          await MainActor.run { self.lanDoi += 1 }
-        }
+        await MainActor.run { self.lanDoi += 1 }
       } catch is CancellationError {
         // Người dùng bấm huỷ — không phải lỗi, không báo gì.
       } catch {
-        await MainActor.run { self.loi = "\(goi.ten): \(error.localizedDescription)" }
+        if !Task.isCancelled {
+          await MainActor.run { self.loi = "\(goi.ten): \(error.localizedDescription)" }
+        }
       }
       await MainActor.run {
+        guard cua == self.luot else { return }
         self.dangTai = nil
         self.tocDo = 0
       }
@@ -161,6 +193,10 @@ final class TaiMoHinh {
     let tam = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString)
     FileManager.default.createFile(atPath: tam.path, contents: nil)
+    // Huỷ hay hỏng giữa chừng thì xoá file tạm — bản trước để lại tới 478 MB
+    // trong thư mục tạm mỗi lần.
+    var xong = false
+    defer { if !xong { try? FileManager.default.removeItem(at: tam) } }
     let tep = try FileHandle(forWritingTo: tam)
     defer { try? tep.close() }
 
@@ -197,29 +233,71 @@ final class TaiMoHinh {
     }
     let cuoi = daXong
     await MainActor.run { self.daTaiByte = cuoi }
+    xong = true
     return tam
   }
 
+  /// Tải gói nén, soi mã băm, bung vào một thư mục NHÁP rồi mới dời vào chỗ.
+  ///
+  /// Bản trước bung thẳng vào thư mục mô hình, mà `daCo` chỉ hỏi file có tồn
+  /// tại không: bị huỷ hay hết chỗ giữa chừng là để lại một file cụt, lần sau
+  /// gói hiện "Đã có", không còn nút tải lại, và engine chết lúc nạp. Bung
+  /// trong nháp rồi dời từng mục cấp trên cùng thì thư mục thật chỉ đổi khi cả
+  /// gói đã bung đủ và đúng cỡ.
   private func taiNen(_ goi: GoiMoHinh) async throws {
     guard let u = goi.url else { return }
     let tam = try await taiRaTep(u, congDon: 0)
     defer { try? FileManager.default.removeItem(at: tam) }
     try Task.checkCancellation()
 
+    if let ma = goi.maBam, try Self.sha256(tam) != ma { throw LoiTai.saiMaBam }
+
     // `mappedIfSafe` để gói nửa GB không phải nằm hết trong RAM.
     let d = try Data(contentsOf: tam, options: .mappedIfSafe)
     guard let muc = Zip.doc(d) else { throw LoiTai.khongPhaiZip }
 
+    let fm = FileManager.default
     let dich = Engine.thuMucMoHinh
+    let nhap = dich.appendingPathComponent(".dang-bung-\(goi.id)")
+    try? fm.removeItem(at: nhap)
+    try fm.createDirectory(at: nhap, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: nhap) }
+
+    var capTren = Set<String>()
     for (ten, m) in muc where !ten.hasSuffix("/") {
       try Task.checkCancellation()
-      let ra = dich.appendingPathComponent(ten)
-      try FileManager.default.createDirectory(
-        at: ra.deletingLastPathComponent(), withIntermediateDirectories: true)
-      try? FileManager.default.removeItem(at: ra)
+      // Chặn đường dẫn leo ra ngoài thư mục đích ("zip slip"), như bản Flutter.
+      let phan = ten.split(separator: "/").map(String.init)
+      guard !ten.hasPrefix("/"), !phan.contains(".."), let dau = phan.first else { continue }
+      let ra = nhap.appendingPathComponent(ten)
+      try fm.createDirectory(at: ra.deletingLastPathComponent(), withIntermediateDirectories: true)
       // Bung THẲNG ra đĩa: file to nhất trong gói v2 gần 300 MB.
       try Zip.ruotRaDia(d, m, ra: ra)
+      capTren.insert(dau)
     }
+    try Task.checkCancellation()
+
+    let dau = dich.appendingPathComponent(goi.dauBungXong)
+    try? fm.removeItem(at: dau)
+    for ten in capTren {
+      let tu = nhap.appendingPathComponent(ten)
+      let toi = dich.appendingPathComponent(ten)
+      try? fm.removeItem(at: toi)
+      try fm.moveItem(at: tu, to: toi)
+    }
+    fm.createFile(atPath: dau.path, contents: Data(goi.maBam?.utf8 ?? "".utf8))
+    guard goi.daCo else { throw LoiTai.thieuFile }
+  }
+
+  /// SHA-256 của một file, đọc từng mẩu 1 MB.
+  private static func sha256(_ u: URL) throws -> String {
+    let tep = try FileHandle(forReadingFrom: u)
+    defer { try? tep.close() }
+    var bam = SHA256()
+    while let manh = try tep.read(upToCount: 1 << 20), !manh.isEmpty {
+      bam.update(data: manh)
+    }
+    return bam.finalize().map { String(format: "%02x", $0) }.joined()
   }
 
   private func taiRoi(_ goi: GoiMoHinh) async throws {
@@ -241,10 +319,14 @@ final class TaiMoHinh {
   enum LoiTai: LocalizedError {
     case mayChu(Int)
     case khongPhaiZip
+    case saiMaBam
+    case thieuFile
     var errorDescription: String? {
       switch self {
       case .mayChu(let m): "máy chủ trả mã \(m)"
       case .khongPhaiZip: "file tải về không phải ZIP hợp lệ"
+      case .saiMaBam: "gói tải về sai SHA-256 — hãy tải lại"
+      case .thieuFile: "bung xong nhưng vẫn thiếu file"
       }
     }
   }

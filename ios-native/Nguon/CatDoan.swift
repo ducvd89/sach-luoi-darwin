@@ -32,9 +32,12 @@ extension StringProtocol {
 /// bộ hạ về dạng thường gặp, từ ghép viết dính bọc thẻ `<en>`. Phần hiện giữ
 /// nguyên chữ trong sách — người ta viết hoa để nhấn mạnh, và "1.234" đọc lên
 /// là "một nghìn hai trăm ba mươi tư" nhưng trên màn vẫn phải là "1.234".
-struct Doan: Hashable, Codable {
+struct Doan: Hashable, Codable, Sendable {
   var hien: String
   var doc: String
+  /// Đoạn này là tiêu đề chương — đọc lên như mọi đoạn khác, nhưng không bao
+  /// giờ bị cắt tiếp, và khung đọc vẽ nó như tiêu đề.
+  var tieuDe = false
 
   /// Sách lưu trước 2.0.1a chỉ có một chuỗi mỗi đoạn. Đọc được cả dạng ấy thì
   /// người dùng không mất thư viện khi cập nhật — đoạn cũ lấy luôn chuỗi đó
@@ -48,14 +51,25 @@ struct Doan: Hashable, Codable {
     let c = try decoder.container(keyedBy: Khoa.self)
     hien = try c.decode(String.self, forKey: .hien)
     doc = try c.decode(String.self, forKey: .doc)
+    tieuDe = try c.decodeIfPresent(Bool.self, forKey: .tieuDe) ?? false
   }
 
-  init(hien: String, doc: String) {
+  /// Chỉ ghi `tieuDe` khi bật: mỗi cuốn có hàng chục nghìn đoạn, mà gần như
+  /// đoạn nào cũng không phải tiêu đề.
+  func encode(to encoder: any Encoder) throws {
+    var c = encoder.container(keyedBy: Khoa.self)
+    try c.encode(hien, forKey: .hien)
+    try c.encode(doc, forKey: .doc)
+    if tieuDe { try c.encode(true, forKey: .tieuDe) }
+  }
+
+  init(hien: String, doc: String, tieuDe: Bool = false) {
     self.hien = hien
     self.doc = doc
+    self.tieuDe = tieuDe
   }
 
-  private enum Khoa: String, CodingKey { case hien, doc }
+  private enum Khoa: String, CodingKey { case hien, doc, tieuDe }
 }
 
 /// Khoá tra bảng so SÁT TỪNG ĐƠN VỊ MÃ UTF-16, không theo tương đương Unicode.
@@ -476,6 +490,11 @@ enum CatDoan {
   static func cat(_ van: String, bang: [KhoaTho: String] = [:], moSo: Bool = true) -> [Doan] {
     var ra: [Doan] = []
     var buffer = ""
+    // `buildChunks` của bản Flutter chuẩn hoá phần hiện (`normalizeForDisplay`)
+    // TRƯỚC khi cắt. Bản 2.0.0a bỏ bước này, nên ký tự vô hình, NBSP và khoảng
+    // trắng đôi lọt thẳng lên màn hình và vào engine — và các phép so khoảng
+    // trắng bên dưới (` `, `\n`) vốn chỉ đúng trên văn bản đã chuẩn hoá.
+    let van = ChuanHoa.deHien(van)
 
     /// Chốt một mẩu thành đoạn thật.
     ///
@@ -569,6 +588,22 @@ enum CatDoan {
     }
     chot()
     return ra
+  }
+
+  /// Đoạn tiêu đề chương — nhánh `heading` trong `buildChunks` của bản Flutter.
+  ///
+  /// Tiêu đề thành một đoạn riêng, đọc lên trước thân chương: người nghe biết
+  /// mình đang ở đâu, và khi xuất file theo chương thì mốc cắt trùng đúng đầu
+  /// chương. Bản 2.0.0a chỉ hiện tên chương chứ không đọc. Đoạn tiêu đề không
+  /// đụng tới bộ đệm của thân chương, nên tách riêng ra đây không làm lệch cách
+  /// chia các đoạn còn lại.
+  static func tieuDe(_ ten: String, bang: [KhoaTho: String] = [:], moSo: Bool = true) -> Doan? {
+    let t = ChuanHoa.deHien(ten)
+    guard !t.isEmpty else { return nil }
+    let hien = chotDau(Rx(#"[.:\s]+$"#).thayHet(t, "") + ".")
+    let doc = ChuanHoa.deDoc(suaChuHoa(hien, bang), moSo: moSo)
+    guard docDuoc(doc) else { return nil }
+    return Doan(hien: hien, doc: doc, tieuDe: true)
   }
 
   /// Tách theo dòng trống — tương đương `split(RegExp(r'\n{2,}'))`.

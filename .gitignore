@@ -56,6 +56,7 @@ Thumbs.db
 # Thư mục dựng: 300–400 MB mỗi cái, sinh lại được hoàn toàn.
 ios-native/build/
 ios-native/buildsim/
+ios-native/buildmac/
 
 # File .xcodeproj do xcodegen SINH RA từ project.yml, không phải file nguồn.
 #

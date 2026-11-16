@@ -88,8 +88,14 @@ dung_opus() {
 # đổi mức iOS tối thiểu ở trên mà không xoá đây thì **không có gì đổi cả**, .a
 # mới vẫn mang mức cũ và chẳng ai báo. Xoá thì tốn thêm vài phút dựng lại
 # llama.cpp, đổi lấy việc con số ở trên luôn là con số thật.
+#
+# `mp3lame-sys` dính đúng bẫy ấy qua đường khác: nó dựng LAME bằng autotools và
+# cũng không khai `rerun-if-env-changed`. Bản macOS từng mang 19 file .o của
+# LAME đòi macOS 26.5 (mức của SDK) trong khi mọi thứ khác đúng 15.5 — trình
+# liên kết chỉ cảnh báo "built for newer 'macOS' version" rồi vẫn cho qua.
 xoa_cache_llama() {
-  rm -rf "$goc/native/vieneu/target/$1/release/build/llama-cpp-sys-2-"*
+  rm -rf "$goc/native/vieneu/target/$1/release/build/llama-cpp-sys-2-"* \
+         "$goc/native/vieneu/target/$1/release/build/mp3lame-sys-"*
 }
 
 dung_ios() {

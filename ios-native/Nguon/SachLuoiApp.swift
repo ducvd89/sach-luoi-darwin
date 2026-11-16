@@ -13,7 +13,24 @@ import SwiftUI
 /// đúng.
 @main
 struct SachLuoiApp: App {
-  @State private var kho = KhoSach()
+  @State private var kho: KhoSach
+
+  init() {
+    #if os(macOS)
+    // Bản Mac của `ort` là `load-dynamic`: nó đọc ORT_DYLIB_PATH ĐÚNG MỘT LẦN,
+    // lúc dựng phiên ONNX Runtime đầu tiên. Không đặt thì nó tìm
+    // libonnxruntime.dylib cạnh file thực thi (`Contents/MacOS`), không thấy —
+    // file nằm ở `Contents/Frameworks` — và thư viện Rust dựng với
+    // `panic = "abort"` nên cả app chết ngay, không một dòng báo lỗi. Màn Cài
+    // đặt hỏi phiên bản ONNX Runtime mỗi lần vẽ, nên chỉ cần mở tab ấy là chết.
+    // Phải đặt TRƯỚC mọi thứ khác, kể cả trước khi dựng KhoSach.
+    if let fw = Bundle.main.privateFrameworksURL?
+      .appendingPathComponent("libonnxruntime.dylib") {
+      setenv("ORT_DYLIB_PATH", fw.path, 1)
+    }
+    #endif
+    _kho = State(initialValue: KhoSach())
+  }
 
   var body: some Scene {
     WindowGroup {

@@ -81,6 +81,10 @@ struct XuatFileView: View {
             .foregroundStyle(.secondary)
         }
       }
+      // Kiểu nhóm như iOS. Mặc định trên Mac là kiểu CỘT: nhãn canh phải, nội
+      // dung bên trái — dòng gói mô hình (nhãn + vạch tiến trình + mô tả) không
+      // vào khuôn ấy, nên vạch tràn hết bề ngang cửa sổ và kéo lệch cả cột nhãn.
+      .formStyle(.grouped)
       .navigationTitle("Xuất file")
     }
   }
@@ -92,7 +96,6 @@ struct CaiDatView: View {
   @Environment(\.verticalSizeClass) private var lopCao
 
   @State private var engine = "VieNeu v3 Turbo"
-  @State private var kiemAm = false
 
   private let engines: [(String, String)] = [
     ("VieNeu v3 Turbo", "Chạy thẳng trên máy, không cần mạng. Đọc nhanh hơn tốc độ nghe."),
@@ -143,7 +146,13 @@ struct CaiDatView: View {
         }
 
         Section("Kiểm âm") {
-          Toggle("Kiểm tra trước khi phát", isOn: $kiemAm)
+          @Bindable var cd = CaiDat.chung
+          Toggle("Kiểm tra trước khi phát", isOn: $cd.kiemAm)
+          if cd.kiemAm, !GoiMoHinh.kiemAm.daCo {
+            Text("Cần tải \(GoiMoHinh.kiemAm.ten) ở mục Mô hình trên máy — chưa có thì vẫn nghe được, chỉ là không kiểm.")
+              .font(.caption)
+              .foregroundStyle(.orange)
+          }
           Text("Đọc lại tối đa 2 lần nếu số âm nghe được lệch khỏi dải 100–110%.")
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -166,6 +175,10 @@ struct CaiDatView: View {
             .foregroundStyle(.secondary)
         }
       }
+      // Kiểu nhóm như iOS. Mặc định trên Mac là kiểu CỘT: nhãn canh phải, nội
+      // dung bên trái — dòng gói mô hình (nhãn + vạch tiến trình + mô tả) không
+      // vào khuôn ấy, nên vạch tràn hết bề ngang cửa sổ và kéo lệch cả cột nhãn.
+      .formStyle(.grouped)
       .navigationTitle("Cài đặt")
     }
   }
@@ -195,8 +208,11 @@ struct DongGoi: View {
           Label("Đã có", systemImage: "checkmark.circle.fill")
             .font(.caption).foregroundStyle(.green)
         } else if tai.dangTai == goi.id {
+          // Đỏ như mọi nút huỷ của hệ thống — không thì nó ăn màu cam chung của
+          // app và trông như một nút chính.
           Button("Huỷ", role: .destructive) { tai.huy() }
             .buttonStyle(.glass)
+            .tint(.red)
             .font(.caption)
         } else {
           Button("Tải \(Int(goi.coMB)) MB") { tai.tai(goi) }
