@@ -1023,6 +1023,14 @@ viên. Giờ ra 27 (Vi Tiểu Bảo, Khang Hy, Song Nhi, Trần Cận Nam…).
   mọi lời nói trong đoạn; lời nói trong đoạn kể hỏi từng câu, đoạn trích 450 ký tự trước – 200 sau
   trên chữ cả chương — đúng cách dựng dữ liệu luyện Lộc Đỉnh Ký (`gop.py`).
 - Ứng viên lấy thêm từ mệnh đề dẫn ngay trước ngoặc ("…sơ hở. Vi Tiểu Bảo nói: “").
+- Ứng viên nhận cả **tên + chức vị** ("Khang thân vương", "Tiền lão bản", "Trần Tổng đà chủ" —
+  `dsChucVi`) và **danh xưng dùng thay tên** ("tiểu quận chúa", "thái hậu" — `dsVaiDanh`); giới tính
+  theo chức vị. "Họ + chức vị" là bí danh của người tên đầy đủ cùng họ nếu chương chỉ có đúng một
+  người như thế (Trần tổng đà chủ = Trần Cận Nam). Lần đo đầu trên Lộc Đỉnh Ký hồi 8, 10, 11 (Laya
+  bản 5080, nhãn Opus, 952 lời nói): 67% đúng, 23% sai giọng, 10% về người dẫn — và 147/219 câu sai
+  là vì người nói thật không có trong danh sách ứng viên (Khang thân vương, tiểu quận chúa → Khang Hy;
+  Trần Cận Nam tách thành "Trần Tổng"). Không có "đà chủ" trần trong danh sách chức vị: có thì
+  "Trần Tổng đà chủ" thành tên "Trần Tổng" + "đà chủ".
 - Nhãn khoá "chương:đoạn văn:câu"; khoá hai phần của 2.1.0 vẫn đọc được (áp cho cả đoạn văn).
 
 **Sách cắt theo lời nói NGAY TỪ LÚC NHẬP, bật/tắt nhiều giọng không cắt lại.** Mỗi lời nói là một

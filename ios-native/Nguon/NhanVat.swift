@@ -79,6 +79,36 @@ enum NhanVatLuat {
   /// một từ đệm chưa bao giờ chạy — "Rồi Lục Vô Song nói" sau câu thoại không
   /// được tính. Ở đây ICU hiểu đúng nên luật CHẠY: hai bản có thể ra danh sách
   /// ứng viên khác nhau ở những tên chỉ đứng sau từ đệm.
+  /// Chức vị đứng SAU tên ("Khang thân vương", "Tiền lão bản", "Trần Tổng đà
+  /// chủ") — `dsChucVi` của bản Dart, cùng thứ tự. Phần chức vị viết thường nên
+  /// luật tên chỉ bắt được "Khang", rồi bị loại vì "khang" là từ thường: Lộc Đỉnh
+  /// Ký hồi 10, 34 câu của Khang thân vương bị gán cho Khang Hy. Không có "đà
+  /// chủ" trần — có thì "Trần Tổng đà chủ" thành tên "Trần Tổng" + "đà chủ".
+  static let dsChucVi = [
+    "tổng đà chủ", "thân vương", "vương gia", "quận chúa", "công chúa", "lão bản", "lão công",
+    "công công", "thượng nhân", "đại sư", "đạo nhân", "hương chủ", "sư phó", "sư thái", "phu nhân",
+    "cô nương", "công tử", "tướng quân", "đại nhân", "tiên sinh",
+  ]
+  /// Danh xưng dùng THAY tên — `dsVaiDanh` bên Dart. Lộc Đỉnh Ký hồi 10–11: 89
+  /// câu của "tiểu quận chúa" bị gán cho Khang Hy vì danh xưng viết thường.
+  static let dsVaiDanh = [
+    "tiểu quận chúa", "quận chúa", "công chúa", "thái hậu", "hoàng thượng", "hoàng hậu", "vương gia",
+    "tổng đà chủ",
+  ]
+  /// Cho phép viết hoa chữ cái đầu ("Tổng đà chủ" giữa câu).
+  private static func hoaDau(_ s: String) -> String {
+    let d = String(s.prefix(1))
+    return "[\(d)\(d.uppercased())]" + NSRegularExpression.escapedPattern(for: String(s.dropFirst()))
+  }
+  private static let tenChucVi = Rx(#"(\p{Lu}\p{Ll}+(?: \p{Lu}\p{Ll}+){0,2}) ("#
+                                    + dsChucVi.map(hoaDau).joined(separator: "|") + #")(?![\p{L}])"#)
+  private static let vaiDanh = Rx(#"(?<![\p{L}])("# + dsVaiDanh.map(hoaDau).joined(separator: "|") + #")(?![\p{L}])"#)
+
+  static func coChucVi(_ ten: String) -> Bool {
+    let t = ten.lowercased()
+    return dsChucVi.contains { t.hasSuffix(" \($0)") } || dsVaiDanh.contains(t)
+  }
+
   private static let tuDemDauDong = Rx(#"^\s*\p{Lu}\p{Ll}*\s"#)
   private static let gachDauThoai = Rx(#"^[—–-]\s*[\p{L}“"«]"#)
 
@@ -279,6 +309,21 @@ enum NhanVatLuat {
     for m in khop(tenMotAm, dong) {
       if let t = m.nhom[0], !tuThuong.contains(t.lowercased()) { ung.append((m.viTri, t)) }
     }
+    // Tên + chức vị: bỏ từ mở câu đứng đầu phần tên như nhánh nhiều âm tiết.
+    for m in khop(tenChucVi, dong) {
+      guard let ten = m.nhom[1], let chuc = m.nhom[2] else { continue }
+      var am = ten.components(separatedBy: " ")
+      var batDau = m.viTri
+      while !am.isEmpty, tuMoCau.contains(am[0].lowercased()) {
+        batDau += am[0].dai + 1
+        am.removeFirst()
+      }
+      if am.isEmpty { continue }
+      ung.append((batDau, am.joined(separator: " ") + " " + chuc.lowercased()))
+    }
+    for m in khop(vaiDanh, dong) {
+      if let v = m.nhom[1] { ung.append((m.viTri, vietHoaDau(v.lowercased()))) }
+    }
     guard !ung.isEmpty else { return nil }
     // Gần đầu dòng nhất; cùng vị trí thì dạng DÀI hơn ("Lục Vô Song" thắng "Lục").
     ung.sort { $0.0 != $1.0 ? $0.0 < $1.0 : $0.1.dai > $1.1.dai }
@@ -420,7 +465,33 @@ enum NhanVatLuat {
     let dau = (ten.components(separatedBy: " ").first ?? "").lowercased()
     if dau == "bà" || dau == "cô" { return "nu" }
     if ["ông", "chú", "lão", "thầy", "cụ", "bác"].contains(dau), ten.contains(" ") { return "nam" }
+    // Chức vị / danh xưng nói luôn giới tính ("Khang thân vương", "tiểu quận chúa").
+    let t = ten.lowercased()
+    func laChuc(_ c: String) -> Bool { t == c || t.hasSuffix(" \(c)") }
+    if ["quận chúa", "công chúa", "thái hậu", "hoàng hậu", "phu nhân", "cô nương", "sư thái"].contains(where: laChuc) {
+      return "nu"
+    }
+    if (dsChucVi + dsVaiDanh).contains(where: laChuc) { return "nam" }
     return ""
+  }
+
+  /// "Họ + chức vị" ("Trần tổng đà chủ") là bí danh của người có tên đầy đủ
+  /// cùng họ nếu trong các chương đang phân tích có ĐÚNG MỘT người như thế —
+  /// `_biDanh` bên Dart. Lộc Đỉnh Ký hồi 8: 24 câu của Trần Cận Nam từng mang
+  /// tên "Trần Tổng".
+  private static func biDanh(_ ten: [String], _ vanChuong: String) -> [String: String] {
+    var ra: [String: String] = [:]
+    for t in ten where coChucVi(t) {
+      let am = t.components(separatedBy: " ")
+      guard am.count >= 2, am[0].unicodeScalars.first?.properties.isUppercase == true,
+            !dsVaiDanh.contains(t.lowercased()) else { continue }
+      let cung = ten.filter { b in
+        b != t && !coChucVi(b) && b.components(separatedBy: " ").count >= 2
+          && b.components(separatedBy: " ")[0] == am[0] && coTen(b, vanChuong)
+      }
+      if cung.count == 1 { ra[t] = cung[0] }
+    }
+    return ra
   }
 
   // MARK: - Giới tính
@@ -484,7 +555,15 @@ enum NhanVatLuat {
   ) async throws -> KetQuaNhanVat {
     let ungVien = timUngVien(doanVanTheoChuong, chuong: chuong)
     guard ungVien.count >= 2 else { return KetQuaNhanVat(nhanVat: [], nguoiNoi: [:]) }
-    let ten = ungVien.map(\.0)
+    let vanChuong = doanVanTheoChuong.enumerated().filter { chuong.contains($0.offset) }
+      .map { $0.element.joined(separator: "\n") }.joined(separator: "\n")
+    let biDanh = biDanh(ungVien.map(\.0), vanChuong)
+    // Bí danh không làm lựa chọn riêng: nó có mặt trong cửa sổ là người mang tên
+    // thật có mặt.
+    let ten = ungVien.map(\.0).filter { biDanh[$0] == nil }
+    func coMat(_ t: String, _ van: String) -> Bool {
+      coTen(t, van) || biDanh.contains { $0.value == t && coTen($0.key, van) }
+    }
     // Người được nhắc nhiều nhất làm ứng viên dự phòng khi tên không đứng gần
     // câu thoại. `ungVien` đã xếp theo số lần nhắc.
     let hangDau = Array(ten.prefix(3))
@@ -504,7 +583,7 @@ enum NhanVatLuat {
         let hoiCau = cauHoi(ds[i])
         if hoiCau.isEmpty { continue }
         let cuaSo = ds[max(0, i - 6)..<min(ds.count, i + 3)].joined(separator: "\n")
-        var lua = ten.filter { coTen($0, cuaSo) }
+        var lua = ten.filter { coMat($0, cuaSo) }
         for t in hangDau where !lua.contains(t) { lua.append(t) }
         let chon = Array(lua.prefix(toiDaUngVien))
         // Đoạn văn MỞ ĐẦU bằng thoại hỏi MỘT lần cả đoạn (cách đã đo 2.1.0,
