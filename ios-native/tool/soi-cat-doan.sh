@@ -21,16 +21,18 @@ trap 'rm -rf "$tam"' EXIT
 n="$goc/ios-native/Nguon"
 xcrun swiftc -O -o "$tam/soi" \
   "$n/CatDoan.swift" "$n/ChuanHoa.swift" "$n/SoViet.swift" "$n/Rx.swift" \
-  "$n/NhapSach.swift" "$n/DonSach.swift" "$n/Zip.swift" \
+  "$n/NhapSach.swift" "$n/DonSach.swift" "$n/Zip.swift" "$n/NhanVat.swift" \
   "$goc/ios-native/tool/soi-cat-doan/main.swift"
 
 "$tam/soi" tho "$sach" "$tam/van.txt"
 "$tam/soi" cat "$tam/van.txt" "$tam/swift.txt" "$moSo"
-(cd "$goc/app" && dart run tool/soi_cat_doan.dart "$tam/van.txt" "$tam/dart.txt" "$moSo")
+(cd "$goc/app" && dart run tool/soi_cat_doan.dart "$tam/van.txt" "$tam/dart.txt" "$moSo" 2>/dev/null)
 
+# Ba cột: phần hiện, phần đọc, và chỉ số lời nói của từng đoạn ("đoạn văn:câu
+# thoại") — khoá tra người nói lúc phát, lệch là đọc nhầm giọng.
 loi=0
-for phan in "" ".am"; do
-  ten=$([ -z "$phan" ] && echo "phần hiện" || echo "phần đọc")
+for phan in "" ".am" ".cau"; do
+  ten=$([ -z "$phan" ] && echo "phần hiện" || ([ "$phan" = ".am" ] && echo "phần đọc" || echo "chỉ số lời nói"))
   if cmp -s "$tam/swift.txt$phan" "$tam/dart.txt$phan"; then
     echo "khớp: $ten"
   else

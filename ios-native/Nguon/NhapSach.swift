@@ -23,6 +23,10 @@ enum NhapSach {
   struct ChuongThat {
     var ten: String
     var doan: [Doan]
+    /// Chỉ số chương trong `ThoKetQua.chuong` — trước khi bỏ mục lục và chương
+    /// rỗng. Nhãn người nói gắn theo chỉ số này (xem `KetQuaNhanVat.khoa`), vì
+    /// số thứ tự chương sau khi dọn có thể đổi giữa các lần cắt.
+    var goc: Int
   }
 
   /// Một chương CHƯA cắt đoạn: tên và cả khối văn bản đã dọn thẻ.
@@ -64,14 +68,23 @@ enum NhapSach {
     let bang = CatDoan.bangChuHoa(tho.chuong.flatMap { [$0.ten, $0.van] })
 
     var chuong: [ChuongThat] = []
-    for t in tho.chuong {
-      var doan = CatDoan.cat(t.van, bang: bang, moSo: moSo)
-      if tho.laEpub {
-        if DonSach.laMucLuc(ten: t.ten, doan: doan) { continue }
-        doan = DonSach.boTieuDeLap(ten: t.ten, doan: doan)
+    for (k, t) in tho.chuong.enumerated() {
+      // Mỗi chương một túi autorelease. Bộ cắt gọi NSString/NSRegularExpression
+      // hàng trăm nghìn lượt, mỗi lượt để lại vài đối tượng autorelease; chạy
+      // trong Task.detached thì không có runloop nào xả túi, nên chúng dồn tới
+      // cuối lượt nhập. Đo trên Mac: Phàm Nhân Tu Tiên (13 MB EPUB) đỉnh 17 GB,
+      // Đạo 13,7 GB, Lộc Đỉnh Ký 2,8 GB — iPhone giết app ở ~3,4 GB, tức nhập
+      // sách dày là "crash".
+      let doan: [Doan]? = autoreleasepool {
+        var doan = CatDoan.cat(t.van, bang: bang, moSo: moSo)
+        if tho.laEpub {
+          if DonSach.laMucLuc(ten: t.ten, doan: doan) { return nil }
+          doan = DonSach.boTieuDeLap(ten: t.ten, doan: doan)
+        }
+        return doan
       }
-      guard !doan.isEmpty else { continue }
-      chuong.append(ChuongThat(ten: t.ten, doan: doan))
+      guard let doan, !doan.isEmpty else { continue }
+      chuong.append(ChuongThat(ten: t.ten, doan: doan, goc: k))
     }
 
     if tho.laEpub {
@@ -86,7 +99,7 @@ enum NhapSach {
     // các bước dọn so đoạn đầu với tên chương, có tiêu đề nằm đó thì chúng xoá
     // nhầm chính nó.
     for i in chuong.indices {
-      if let td = CatDoan.tieuDe(chuong[i].ten, bang: bang, moSo: moSo) {
+      if let td = autoreleasepool(invoking: { CatDoan.tieuDe(chuong[i].ten, bang: bang, moSo: moSo) }) {
         chuong[i].doan.insert(td, at: 0)
       }
     }
@@ -191,10 +204,13 @@ enum NhapSach {
 
     var tho: [ChuongTho] = []
     for href in hrefs {
-      guard let html = docVan(href) else { continue }
+      // Túi autorelease cho từng file HTML — cùng lý do với `cat`: sách nghìn
+      // chương mà để dồn thì riêng bước tách thô đã vài GB.
+      autoreleasepool {
+      guard let html = docVan(href) else { return }
       let van = htmlSangVan(html)
       // Bỏ trang bìa, trang trắng.
-      if Rx(#"\s"#).thayHet(van, "").dai < 30 { continue }
+      if Rx(#"\s"#).thayHet(van, "").dai < 30 { return }
 
       var tenC = tenMucLuc[href] ?? ""
       if tenC.isEmpty,
@@ -209,6 +225,7 @@ enum NhapSach {
 
       tho.append(ChuongTho(ten: tenC, van: DonSach.boTieuDeLapVan(
         ten: tenC, tenSach: tenSach, tacGia: tacGia, van: van)))
+      }
     }
     guard !tho.isEmpty else {
       throw Loi.khongDocDuoc("không trích xuất được nội dung văn bản nào từ EPUB")

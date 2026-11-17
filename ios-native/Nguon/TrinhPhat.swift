@@ -46,6 +46,16 @@ final class TrinhPhat {
 
   /// Số đoạn tối đa xếp sẵn trong loa: một đang phát, một chờ.
   private let tranHang = 2
+  /// Đọc nhiều giọng cắt sách theo người nói nên đoạn rất ngắn ("Dạ." ~1 giây
+  /// tiếng), mà mỗi lượt tổng hợp tốn cố định ~1,4 giây dù ngắn đến đâu. Xếp
+  /// sẵn chỉ hai đoạn như thế thì che được vài giây nghe, sang câu kế là chờ.
+  /// Nên hàng được dài thêm khi phần CHỜ PHÁT còn dưới chừng này chữ (~17 giây
+  /// nghe) — đoạn thường dài ~256 chữ nên hàng của sách đọc một giọng vẫn
+  /// đúng hai đoạn như trước. Bản Flutter đổi sang ngân sách 500 chữ đọc
+  /// trước, và kéo luôn sách MỘT giọng lên đọc trước hai đoạn thay vì một.
+  private let chuChoPhat = 250
+  /// Trần cứng số đoạn trong hàng, kể cả khi toàn đoạn ngắn.
+  private let tranHangNgan = 8
 
   /// Nối mã đuôi đoạn trước làm ngữ cảnh cho đoạn sau — TẮT, vì làm đọc lặp.
   ///
@@ -160,6 +170,31 @@ final class TrinhPhat {
     if dangPhat { khoiChay(chuong: chiSoChuong, doan: doanDang) } else { dung() }
   }
 
+  /// Giọng của một nhân vật vừa đổi: phần đã đọc trước mang giọng cũ.
+  func giongNhanVatDoi() { doiGiong() }
+
+  /// Sách vừa được cắt lại (bật/tắt nhiều giọng, phân tích thêm chương): số
+  /// đoạn đổi hết nên phần đã xếp không còn trỏ đúng chỗ. Mở lại ở vị trí
+  /// `catLai` đã dịch sang, đang nghe thì nghe tiếp.
+  ///
+  /// Vị trí dịch từ chỗ của CHÍNH trình phát (chương đang mở, đoạn đang nghe),
+  /// không từ tiến trình đã lưu: chọn chương khác mà chưa bấm phát thì tiến
+  /// trình lưu vẫn ở chương cũ, dịch theo nó là khung đọc nhảy về chương cũ.
+  func thaySach(_ moi: Sach) {
+    guard sachId == moi.id else { return }
+    let dangNghe = dangPhat
+    let n = sach.map { KhoSach.doiViTri((chiSoChuong, doanDang), tu: $0, sang: moi) } ?? moi.doanDang
+    dung()
+    sach = moi
+    dauChuong = moi.dauChuong
+    let vt = moi.viTri(n)
+    chiSoChuong = vt.chuong
+    doanDang = vt.doan
+    baoTienDo()
+    capNhatManKhoa()
+    if dangNghe { khoiChay(chuong: vt.chuong, doan: vt.doan) }
+  }
+
   /// Cuốn sách bị xoá khỏi thư viện.
   func boSach(_ id: UUID) {
     guard sachId == id else { return }
@@ -230,8 +265,11 @@ final class TrinhPhat {
       guard c < sach.chuong.count else { break }
 
       // Giọng người dùng chọn; nếu engine không có thì mới lùi về giọng đầu.
+      // Đọc nhiều giọng thì đoạn của nhân vật đọc bằng giọng của người ấy.
       let muon = CaiDat.chung.giongChon
-      let giong = giongCo.contains(muon) ? muon : (giongCo.first ?? "")
+      let nguoiDan = giongCo.contains(muon) ? muon : (giongCo.first ?? "")
+      let giong = KhoNhanVat.chung.giong(cho: sach.chuong[c].doan[d], goc: sach.chuong[c].goc,
+                                         sach: sach.id, nguoiDan: nguoiDan, giongCo: giongCo)
       if hang.isEmpty { dangTongHop = true }
 
       let kq: KetQuaDoc
@@ -271,8 +309,8 @@ final class TrinhPhat {
         tamDung()
       }
 
-      // Chờ loa có chỗ: tối đa [tranHang] đoạn xếp sẵn.
-      while hang.count >= tranHang, p == phien {
+      // Chờ loa có chỗ: [tranHang] đoạn, hoặc nhiều hơn khi đoạn ngắn.
+      while p == phien, hangDay(sach) {
         await withCheckedContinuation { choCho = $0 }
       }
       guard p == phien else { return }
@@ -383,6 +421,13 @@ final class TrinhPhat {
       self.henGio = .tat
       self.henDen = nil
     }
+  }
+
+  private func hangDay(_ sach: Sach) -> Bool {
+    if hang.count >= tranHangNgan { return true }
+    guard hang.count >= tranHang else { return false }
+    let cho = hang.dropFirst().reduce(0) { $0 + sach.chuong[$1.chuong].doan[$1.doan].doc.dai }
+    return cho >= chuChoPhat
   }
 
   /// Loa phát xong đoạn đầu hàng.

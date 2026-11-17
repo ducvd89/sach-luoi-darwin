@@ -16,6 +16,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:path/path.dart' as p;
 
 import '../native_lib.dart';
 
@@ -132,6 +133,8 @@ class _Native {
   static String get _defaultLibraryName {
     if (Platform.isWindows) return 'sachnoi_vieneu.dll';
     if (Platform.isMacOS) return 'libsachnoi_vieneu.dylib';
+    final bundleLib = p.join(p.dirname(Platform.resolvedExecutable), 'lib', 'libsachnoi_vieneu.so');
+    if (File(bundleLib).existsSync()) return bundleLib;
     return 'libsachnoi_vieneu.so';
   }
 

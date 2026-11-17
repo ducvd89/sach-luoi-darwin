@@ -1,6 +1,7 @@
 /// Màn hình nghe: danh sách chương, nội dung đang đọc và thanh điều khiển.
 library;
 
+import 'nhan_vat_page.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -297,10 +298,10 @@ class _PlayerBar extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               _SpeedSelector(),
-              // Màn hình thấp thì ba nút "bật một cái rồi để đấy" thu vào một
-              // dấu ba chấm. Hàng này cần 538 dp để nằm một dòng (48+48+56+48+
+              // Màn hình thấp thì các nút "bật một cái rồi để đấy" thu vào một
+              // dấu ba chấm. Hàng này cần ~650 dp để nằm một dòng (48+48+56+48+
               // 48+10 cho phần tua, 90 cho ô tốc độ, 90 và 100 cho Hẹn giờ và
-              // Kiểm âm, thêm 75 nếu có nút Khoá của Android); mặt gập iPhone
+              // Kiểm âm, ~110 cho Nhân vật, thêm 75 nếu có nút Khoá của Android); mặt gập iPhone
               // Duo chỉ rộng ~466 dp nên nó lùi thành hai dòng, mà chiều cao ở
               // đó đang là thứ thiếu nhất. Gộp lại còn ~392 dp, vừa một dòng.
               //
@@ -314,6 +315,7 @@ class _PlayerBar extends StatelessWidget {
                 _SleepButton(),
                 _SoiAmButton(),
                 _KhoaCamUngButton(),
+                _NhanVatButton(),
               ],
             ],
           ),
@@ -389,6 +391,27 @@ class _SpeedSelector extends StatelessWidget {
 /// cần nói.
 ///
 /// Engine cố định vẫn kiểm được; chỉ bước đọc lại phụ thuộc khả năng engine.
+/// Mở trang Nhân vật (chọn giọng theo nhân vật). Màu vàng khi sách đang đọc nhiều giọng, giống
+/// cách nút kiểm âm bên cạnh thể hiện TRẠNG THÁI đang có chứ không phải việc sẽ làm khi bấm.
+class _NhanVatButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final bat = state.nhanVat?.bat ?? false;
+    final mau = bat ? SacNut.chinh.first : Theme.of(context).colorScheme.onSurface;
+    return Tooltip(
+      message: bat ? 'Đang đọc nhiều giọng theo nhân vật' : 'Nhân vật và giọng đọc',
+      child: TextButton.icon(
+        style: TextButton.styleFrom(
+            foregroundColor: mau, padding: const EdgeInsets.symmetric(horizontal: 10), minimumSize: const Size(0, 40)),
+        onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const NhanVatPage())),
+        icon: const Icon(Icons.groups_2_outlined, size: 20),
+        label: const Text('Nhân vật'),
+      ),
+    );
+  }
+}
+
 class _SoiAmButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -503,7 +526,11 @@ void doiSoiAm(BuildContext context) {
       content: Text(bat ? 'Đã tắt kiểm âm trước khi phát' : 'Đã bật kiểm âm wav2vec2. $chu')));
 }
 
-/// Menu ba chấm gom Hẹn giờ, Kiểm âm và Khoá cảm ứng cho màn hình thấp.
+/// Menu ba chấm gom Hẹn giờ, Kiểm âm, Nhân vật và Khoá cảm ứng cho màn hình thấp.
+///
+/// Mọi nút của hàng đầy đủ phải có mặt ở đây: 2.1.0 thêm nút Nhân vật vào hàng mà quên menu này,
+/// nên màn hình thấp (mặt ngoài iPhone Duo, điện thoại nằm ngang, cửa sổ dưới 700 dp) không mở
+/// được trang Nhân vật — kể cả để tắt đọc nhiều giọng đang khoá ô nối ngữ cảnh.
 ///
 /// Mỗi dòng tự mang màu trạng thái như nút gốc của nó — vàng là đang bật — nên
 /// mở menu ra là thấy ngay cái nào đang chạy, khỏi phải nhớ.
@@ -519,6 +546,7 @@ class _NutThem extends StatelessWidget {
     final player = state.player;
     final henGio = player.sleepAt != null;
     final soiAm = state.settings.soiAmKhiNghe;
+    final nhieuGiong = state.nhanVat?.bat ?? false;
     final nhan = SacNut.chinh.first;
     final thuong = Theme.of(context).colorScheme.onSurface;
 
@@ -548,6 +576,15 @@ class _NutThem extends StatelessWidget {
             title: Text(soiAm ? 'Tắt kiểm âm' : 'Kiểm âm trước khi phát'),
           ),
         ),
+        PopupMenuItem(
+          value: 'nhanvat',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.groups_2_outlined, size: 20, color: nhieuGiong ? nhan : thuong),
+            title: Text(nhieuGiong ? 'Nhân vật · đang đọc nhiều giọng' : 'Nhân vật và giọng đọc'),
+          ),
+        ),
         // Chỉ Android có — xem `services/khoa_cam_ung.dart`.
         if (khoaCamUngDungDuoc)
           PopupMenuItem(
@@ -566,6 +603,8 @@ class _NutThem extends StatelessWidget {
             henGioTat(context, player);
           case 'soiam':
             doiSoiAm(context);
+          case 'nhanvat':
+            Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const NhanVatPage()));
           case 'khoa':
             AppScope.read(context).batKhoaCamUng();
         }
@@ -681,14 +720,16 @@ class _ChonGiongNghe extends StatelessWidget {
           child: BangChonGiong(
             voices: state.voices,
             voiceId: settings.voiceNghe,
-            nguCanh: settings.nguCanhNghe,
+            nguCanh: state.player.dangNhieuGiong ? NguCanh.khong : settings.nguCanhNghe,
             // Đang nghe vẫn đổi giọng được — đoạn kế được tổng hợp trước bằng
             // giọng mới trong lúc đoạn này còn đang phát. Chỉ khoá đúng lúc việc
             // tổng hợp trước đó đang chạy, và luôn khoá cách nối ngữ cảnh vì nó
             // gắn liền với đoạn đang phát.
             dangTaiGiong: dangDoiGiong != null,
             khoaGiong: dangDoiGiong != null ? 'Đang chuẩn bị giọng mới cho đoạn sau…' : null,
-            khoaNguCanh: khongHoTroNguCanh
+            khoaNguCanh: state.player.dangNhieuGiong
+                ? 'Đang đọc nhiều giọng nên không nối ngữ cảnh. Tắt "Đọc nhiều giọng" ở trang Nhân vật để dùng.'
+                : khongHoTroNguCanh
                 ? 'Chỉ VieNeu hỗ trợ nối ngữ cảnh'
                 : (state.player.isPlaying ? 'Tạm dừng nghe rồi mới đổi được' : null),
             onVoice: (v) => AppScope.read(context).setVoiceNghe(v),

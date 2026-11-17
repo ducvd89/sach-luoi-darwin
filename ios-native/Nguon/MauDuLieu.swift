@@ -12,6 +12,9 @@ struct Chuong: Identifiable, Hashable, Codable, Sendable {
   var id = UUID()
   var so: Int
   var ten: String
+  /// Chỉ số chương trong lần tách thô của file gốc (`NhapSach.ChuongThat.goc`)
+  /// — hệ chỉ số của nhãn người nói. -1 với sách nhập trước khi có ô này.
+  var goc = -1
   /// Các đoạn đã cắt sẵn, mỗi đoạn gồm phần hiện và phần đọc. Cắt MỘT LẦN lúc
   /// nhập, không cắt lại lúc chạy — đổi cách cắt hay cách chuẩn hoá thì sách cũ
   /// phải nhập lại mới thấy hiệu lực.
@@ -24,9 +27,10 @@ struct Chuong: Identifiable, Hashable, Codable, Sendable {
   /// có hàng chục nghìn đoạn.
   let kyTu: Int
 
-  init(so: Int, ten: String, doan: [Doan]) {
+  init(so: Int, ten: String, doan: [Doan], goc: Int = -1) {
     self.so = so
     self.ten = ten
+    self.goc = goc
     self.doan = doan
     kyTu = doan.reduce(0) { $0 + $1.hien.dai }
   }
@@ -34,13 +38,14 @@ struct Chuong: Identifiable, Hashable, Codable, Sendable {
   /// Ước lượng thời lượng ở tốc độ 1.0×, để hiện trước khi đọc thật.
   var thoiLuong: TimeInterval { Double(kyTu) / kyTuMoiGiay }
 
-  private enum Khoa: String, CodingKey { case id, so, ten, doan, kyTu }
+  private enum Khoa: String, CodingKey { case id, so, ten, goc, doan, kyTu }
 
   init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: Khoa.self)
     id = try c.decode(UUID.self, forKey: .id)
     so = try c.decode(Int.self, forKey: .so)
     ten = try c.decode(String.self, forKey: .ten)
+    goc = try c.decodeIfPresent(Int.self, forKey: .goc) ?? -1
     doan = try c.decode([Doan].self, forKey: .doan)
     // Sách lưu trước khi có ô này thì tính lại một lần lúc đọc.
     kyTu = try c.decodeIfPresent(Int.self, forKey: .kyTu) ?? doan.reduce(0) { $0 + $1.hien.dai }
@@ -51,6 +56,7 @@ struct Chuong: Identifiable, Hashable, Codable, Sendable {
     try c.encode(id, forKey: .id)
     try c.encode(so, forKey: .so)
     try c.encode(ten, forKey: .ten)
+    try c.encode(goc, forKey: .goc)
     try c.encode(doan, forKey: .doan)
     try c.encode(kyTu, forKey: .kyTu)
   }
@@ -67,6 +73,14 @@ struct Sach: Identifiable, Hashable, Codable, Sendable {
   var doanDang: Int = 0
   /// Chỉ số màu bìa, để bìa một cuốn không đổi màu mỗi lần mở.
   var mauBia: Int = 0
+  /// Đã cắt theo luật tách lời nói (mỗi lời nói một đoạn, `Doan.cau`). nil với
+  /// sách cắt trước luật ấy: nghe được, nhưng đọc nhiều giọng phải cắt lại
+  /// một lần. Optional để sách cũ (không có khoá này) vẫn giải mã được.
+  var catThoai: Bool?
+  /// Tên bản sao file gốc trong `thuvien/` — để cắt lại sách.
+  /// nil với sách nhập trước 2.1.0a: bản ấy không giữ file gốc, phải nhập lại
+  /// mới phân tích nhân vật được.
+  var nguon: String?
 
   var soChuong: Int { chuong.count }
   var tongDoan: Int { chuong.reduce(0) { $0 + $1.doan.count } }
@@ -160,13 +174,26 @@ final class KhoSach {
   nonisolated private static func tepSach(_ id: UUID) -> URL {
     thuMuc.appendingPathComponent("\(id.uuidString).json")
   }
+  /// Danh bạ nhân vật của một cuốn. Đuôi `.nhanvat.json` không đọc được thành
+  /// UUID nên `docTuDia` tự bỏ qua khi nhặt file sách.
+  nonisolated static func tepNhanVat(_ id: UUID) -> URL {
+    thuMuc.appendingPathComponent("\(id.uuidString).nhanvat.json")
+  }
+  nonisolated static func tepNguon(_ ten: String) -> URL { thuMuc.appendingPathComponent(ten) }
 
   init() {
     // Biến môi trường TAB để chụp được từng màn bằng `simctl launch` mà không
     // cần chạm — máy ảo không có đường chạm nào từ dòng lệnh.
     tab = Int(ProcessInfo.processInfo.environment["TAB"] ?? "") ?? 0
     TrinhPhat.chung.luuTienDo = { [weak self] id, n in self?.capNhatTienDo(id, n) }
-    Task { await doc() }
+    // Biến môi trường NHAP (đường dẫn một file sách) — cùng mục đích với TAB:
+    // máy ảo không có trình chọn file nào điều khiển được từ dòng lệnh, nên
+    // muốn chụp màn hình nghe thì phải nhập sẵn một cuốn lúc mở app.
+    let nhapSan = ProcessInfo.processInfo.environment["NHAP"]
+    Task {
+      await doc()
+      if let nhapSan, sach.isEmpty { nhap(URL(fileURLWithPath: nhapSan)) }
+    }
   }
 
   func doc() async {
@@ -275,13 +302,21 @@ final class KhoSach {
         defer { if moDuoc { url.stopAccessingSecurityScopedResource() } }
         return Result {
           let kq = try NhapSach.nhap(tuFile: url)
-          let s = Sach(
+          var s = Sach(
             ten: kq.ten, tacGia: kq.tacGia,
             dinhDang: url.pathExtension.uppercased(),
             chuong: kq.chuong.enumerated().map {
-              Chuong(so: $0.offset + 1, ten: $0.element.ten, doan: $0.element.doan)
+              Chuong(so: $0.offset + 1, ten: $0.element.ten, doan: $0.element.doan, goc: $0.element.goc)
             },
             mauBia: mau)
+          s.catThoai = true
+          // Giữ bản sao file gốc: phân tích nhân vật và cắt lại theo người nói
+          // đều phải đọc lại văn bản thô. Chép hỏng thì vẫn nhập được sách,
+          // chỉ là không đọc nhiều giọng được.
+          let ten = "\(s.id.uuidString).nguon.\(url.pathExtension.lowercased())"
+          if (try? FileManager.default.copyItem(at: url, to: Self.tepNguon(ten))) != nil {
+            s.nguon = ten
+          }
           try Self.ghiSachRaDia(s)
           return s
         }
@@ -301,10 +336,125 @@ final class KhoSach {
 
   func xoa(_ s: Sach) {
     TrinhPhat.chung.boSach(s.id)
+    KhoNhanVat.chung.boSach(s.id)
     sach.removeAll { $0.id == s.id }
     if dangMoId == s.id { dangMoId = sach.first?.id }
     try? FileManager.default.removeItem(at: Self.tepSach(s.id))
+    try? FileManager.default.removeItem(at: Self.tepNhanVat(s.id))
+    if let n = s.nguon { try? FileManager.default.removeItem(at: Self.tepNguon(n)) }
     ghiThuTu()
     ghiTienDo()
+  }
+
+  // MARK: - Cắt lại theo người nói
+
+  /// Văn bản thô của sách, đọc lại từ bản sao file gốc.
+  nonisolated static func docTho(_ s: Sach) throws -> NhapSach.ThoKetQua {
+    guard let n = s.nguon, FileManager.default.fileExists(atPath: tepNguon(n).path) else {
+      throw LoiLaya("Sách này nhập từ bản cũ, không giữ file gốc. Xoá rồi nhập lại để đọc nhiều giọng.")
+    }
+    return try NhapSach.tachTho(tuFile: tepNguon(n))
+  }
+
+  /// Gắn file gốc cho sách nhập trước 2.1.0a (bản ấy không giữ file gốc), rồi
+  /// cắt lại để có chỉ số chương thô. File chọn nhầm cuốn thì từ chối: tên các
+  /// chương phải khớp phần lớn với sách đang có.
+  func ganNguon(_ id: UUID, tu url: URL) async throws -> Sach {
+    guard let cu = sach.first(where: { $0.id == id }) else { throw LoiLaya("Không tìm thấy sách") }
+    let ten = "\(id.uuidString).nguon.\(url.pathExtension.lowercased())"
+    try await Task.detached(priority: .userInitiated) {
+      let moDuoc = url.startAccessingSecurityScopedResource()
+      defer { if moDuoc { url.stopAccessingSecurityScopedResource() } }
+      let tho = try NhapSach.tachTho(tuFile: url)
+      let tenCu = Set(cu.chuong.map(\.ten))
+      let khop = tho.chuong.filter { tenCu.contains($0.ten) }.count
+      guard khop * 2 >= tenCu.count else {
+        throw LoiLaya("File này không phải cuốn \(cu.ten) — tên chương không khớp.")
+      }
+      let dich = Self.tepNguon(ten)
+      try? FileManager.default.removeItem(at: dich)
+      try FileManager.default.copyItem(at: url, to: dich)
+    }.value
+    guard let i = sach.firstIndex(where: { $0.id == id }) else { throw LoiLaya("Sách đã bị xoá") }
+    sach[i].nguon = ten
+    return try await catLai(id)
+  }
+
+  /// Cắt lại cả cuốn từ file gốc bằng bộ cắt hiện tại (sách nhập trước luật
+  /// tách lời nói, hoặc vừa gắn lại file gốc).
+  ///
+  /// Giữ id sách và id từng chương, để khung đọc và trình phát nhận ra vẫn là
+  /// cuốn ấy. Chương ghép theo chỉ số thô (`goc`); sách cũ chưa có `goc` thì
+  /// ghép theo TÊN — ghép hụt là mọi chương mang id mới, khung đọc mất chương
+  /// đang chọn và trang Nhân vật đang mở bị đóng ngang.
+  ///
+  /// Chỗ nghe dịch SAU khi cắt xong, từ tiến trình MỚI NHẤT chứ không phải bản
+  /// chụp lúc bắt đầu: cắt một cuốn dày mất vài giây mà trình phát vẫn chạy,
+  /// dùng bản chụp là lùi về chỗ cũ rồi nghe lại đoạn vừa nghe.
+  func catLai(_ id: UUID) async throws -> Sach {
+    guard let cu = sach.first(where: { $0.id == id }) else { throw LoiLaya("Không tìm thấy sách") }
+    var moi = try await Task.detached(priority: .userInitiated) { () throws -> Sach in
+      let kq = NhapSach.cat(try Self.docTho(cu))
+      var s = cu
+      s.chuong = kq.chuong.enumerated().map {
+        Chuong(so: $0.offset + 1, ten: $0.element.ten, doan: $0.element.doan, goc: $0.element.goc)
+      }
+      for j in s.chuong.indices {
+        if let k = Self.chuongTuongUng(s.chuong[j], trong: cu.chuong) { s.chuong[j].id = cu.chuong[k].id }
+      }
+      return s
+    }.value
+    // Người dùng xoá sách trong lúc cắt: đừng ghi lại, không thì lần mở app sau
+    // `docTuDia` nhặt file ấy lên và cuốn sách sống lại (mất cả file gốc).
+    guard let i = sach.firstIndex(where: { $0.id == id }) else { throw LoiLaya("Sách đã bị xoá") }
+    let hienTai = sach[i]
+    moi.nguon = hienTai.nguon
+    moi.catThoai = true
+    moi.doanDang = Self.doiViTri(hienTai.viTri(hienTai.doanDang), tu: hienTai, sang: moi)
+    sach[i] = moi
+    ghiTienDo()
+    let ghi = moi
+    try await Task.detached(priority: .userInitiated) { try Self.ghiSachRaDia(ghi) }.value
+    return moi
+  }
+
+  /// Chương của [cu] ứng với chương [c] mới: cùng chỉ số thô, hoặc (sách cũ
+  /// chưa có chỉ số thô) cùng tên.
+  nonisolated static func chuongTuongUng(_ c: Chuong, trong cu: [Chuong]) -> Int? {
+    if c.goc >= 0, let k = cu.firstIndex(where: { $0.goc == c.goc }) { return k }
+    return cu.firstIndex { $0.goc < 0 && $0.ten == c.ten }
+  }
+
+  /// Dịch vị trí (chương, đoạn) của sách [cu] sang vị trí trên toàn sách [moi].
+  ///
+  /// Đếm theo SỐ CHỮ VÀ SỐ từ đầu chương, không theo tỉ lệ:
+  /// hai cách cắt cùng một chương có cùng chữ, chỉ khác chỗ ngắt — mà mỗi chỗ
+  /// ngắt nuốt một dấu cách, và cắt theo người nói thêm chỗ ngắt dồn cục ở phần
+  /// thoại, nên tỉ lệ theo độ dài lệch đi vài đoạn ngắn. Tiêu đề chương là đoạn
+  /// riêng ở cả hai bên nên cũng được đếm như nhau.
+  nonisolated static func doiViTri(_ vt: (chuong: Int, doan: Int), tu cu: Sach, sang moi: Sach) -> Int {
+    guard cu.chuong.indices.contains(vt.chuong),
+          let j = moi.chuong.firstIndex(where: { chuongTuongUng($0, trong: cu.chuong) == vt.chuong })
+    else {
+      let n = cu.dauChuong.indices.contains(vt.chuong) ? cu.dauChuong[vt.chuong] + vt.doan : cu.doanDang
+      return cu.tongDoan == 0 ? 0 : min(moi.tongDoan - 1, n * moi.tongDoan / cu.tongDoan)
+    }
+    // Chỉ đếm CHỮ VÀ SỐ: bộ cắt thêm dấu chấm vào đoạn nào thiếu dấu kết câu
+    // (`chotDau`), mà cắt theo người nói nhiều đoạn hơn nên nhiều dấu thêm hơn —
+    // đếm cả dấu câu thì bên mới đếm nhanh hơn và vị trí lùi một đoạn. Đo trên
+    // Harry Potter tập 4: đếm khoảng trắng-loại-trừ chỉ trúng 1.132/6.199 đoạn.
+    func chu(_ d: Doan) -> Int {
+      d.hien.unicodeScalars.reduce(0) {
+        $0 + ($1.properties.isAlphabetic || $1.properties.numericType != nil ? 1 : 0)
+      }
+    }
+    let dich = cu.chuong[vt.chuong].doan.prefix(vt.doan).reduce(0) { $0 + chu($1) }
+    var dem = 0, d = 0
+    let ds = moi.chuong[j].doan
+    while d < ds.count, dem + chu(ds[d]) <= dich {
+      dem += chu(ds[d])
+      d += 1
+    }
+    return moi.dauChuong[j] + min(d, max(0, ds.count - 1))
   }
 }

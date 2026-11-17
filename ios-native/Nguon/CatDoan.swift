@@ -38,6 +38,14 @@ struct Doan: Hashable, Codable, Sendable {
   /// Đoạn này là tiêu đề chương — đọc lên như mọi đoạn khác, nhưng không bao
   /// giờ bị cắt tiếp, và khung đọc vẽ nó như tiêu đề.
   var tieuDe = false
+  /// Lời nói mà đoạn này đọc: "đoạn văn:câu thoại" trong chương — `Chunk.cau`
+  /// của bản Flutter. Rỗng là lời dẫn. Mỗi lời nói đã là một đoạn riêng từ lúc
+  /// nhập, nên người nói tra lúc phát từ nhãn của sách: phân tích thêm chương
+  /// hay bật/tắt nhiều giọng không phải cắt lại sách.
+  var cau = ""
+  /// Người nói ghi thẳng vào đoạn — dạng của bản cắt lại theo người nói trước
+  /// đây. Còn đọc để sách cắt bằng bản ấy vẫn nghe được.
+  var nguoi = ""
 
   /// Sách lưu trước 2.0.1a chỉ có một chuỗi mỗi đoạn. Đọc được cả dạng ấy thì
   /// người dùng không mất thư viện khi cập nhật — đoạn cũ lấy luôn chuỗi đó
@@ -52,6 +60,8 @@ struct Doan: Hashable, Codable, Sendable {
     hien = try c.decode(String.self, forKey: .hien)
     doc = try c.decode(String.self, forKey: .doc)
     tieuDe = try c.decodeIfPresent(Bool.self, forKey: .tieuDe) ?? false
+    nguoi = try c.decodeIfPresent(String.self, forKey: .nguoi) ?? ""
+    cau = try c.decodeIfPresent(String.self, forKey: .cau) ?? ""
   }
 
   /// Chỉ ghi `tieuDe` khi bật: mỗi cuốn có hàng chục nghìn đoạn, mà gần như
@@ -61,15 +71,18 @@ struct Doan: Hashable, Codable, Sendable {
     try c.encode(hien, forKey: .hien)
     try c.encode(doc, forKey: .doc)
     if tieuDe { try c.encode(true, forKey: .tieuDe) }
+    if !nguoi.isEmpty { try c.encode(nguoi, forKey: .nguoi) }
+    if !cau.isEmpty { try c.encode(cau, forKey: .cau) }
   }
 
-  init(hien: String, doc: String, tieuDe: Bool = false) {
+  init(hien: String, doc: String, tieuDe: Bool = false, cau: String = "") {
     self.hien = hien
     self.doc = doc
     self.tieuDe = tieuDe
+    self.cau = cau
   }
 
-  private enum Khoa: String, CodingKey { case hien, doc, tieuDe }
+  private enum Khoa: String, CodingKey { case hien, doc, tieuDe, nguoi, cau }
 }
 
 /// Khoá tra bảng so SÁT TỪNG ĐƠN VỊ MÃ UTF-16, không theo tương đương Unicode.
@@ -421,6 +434,8 @@ enum CatDoan {
   static func bangChuHoa(_ nguon: [String]) -> [KhoaTho: String] {
     var dem: [KhoaTho: [(ma: [UInt16], dang: String, n: Int)]] = [:]
     for s in nguon {
+      // Túi autorelease cho từng chuỗi — xem chú thích ở `NhapSach.cat`.
+      autoreleasepool {
       for tu in tuTrongSach.timHet(s) {
         if hoaToanBo(tu) { continue }
         let khoa = KhoaTho(tu.lowercased())
@@ -432,6 +447,7 @@ enum CatDoan {
           cac.append((ma, tu, 1))
         }
         dem[khoa] = cac
+      }
       }
     }
 
@@ -487,14 +503,15 @@ enum CatDoan {
   /// mà đã đủ dài thì chốt luôn ở đó, giữ lại chỗ ngắt tác giả đặt ra. Nhưng
   /// nhiều sách convert từ web bọc MỖI CÂU vào một `<p>` riêng, nên đoạn văn
   /// quá ngắn phải gộp với đoạn kế — không thì đoạn vỡ vụn thành từng câu.
+  ///
+  /// Mỗi LỜI NÓI thành một đoạn riêng ngay từ lúc nhập (`NhanVatLuat.manhCauThoai`),
+  /// mang chỉ số "đoạn văn:câu thoại" trong `Doan.cau`: chốt bộ đệm trước và sau
+  /// nó, để lời nói không gộp với lời dẫn hay với lời người khác. Lời dẫn vẫn
+  /// gộp qua ranh giới đoạn văn như cũ; đoạn văn không có lời nói cắt y như cũ.
   static func cat(_ van: String, bang: [KhoaTho: String] = [:], moSo: Bool = true) -> [Doan] {
     var ra: [Doan] = []
     var buffer = ""
-    // `buildChunks` của bản Flutter chuẩn hoá phần hiện (`normalizeForDisplay`)
-    // TRƯỚC khi cắt. Bản 2.0.0a bỏ bước này, nên ký tự vô hình, NBSP và khoảng
-    // trắng đôi lọt thẳng lên màn hình và vào engine — và các phép so khoảng
-    // trắng bên dưới (` `, `\n`) vốn chỉ đúng trên văn bản đã chuẩn hoá.
-    let van = ChuanHoa.deHien(van)
+    var cauHienTai = ""
 
     /// Chốt một mẩu thành đoạn thật.
     ///
@@ -529,7 +546,7 @@ enum CatDoan {
           }
         }
       }
-      ra.append(Doan(hien: hien, doc: doc))
+      ra.append(Doan(hien: hien, doc: doc, cau: cauHienTai))
     }
 
     func chot() {
@@ -538,11 +555,8 @@ enum CatDoan {
       buffer = ""
     }
 
-    for doanVan in tachDoanVan(van) {
-      let sach = doanVan.replacingOccurrences(of: "\n", with: " ")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      if sach.isEmpty { continue }
-
+    // Một mẩu văn bản: đoạn văn trọn vẹn, hoặc một phần của nó (lời dẫn / lời nói).
+    func catManh(_ sach: String) {
       // Xử lý đoạn văn này trên một buffer cục bộ, bắt đầu từ đúng chỗ buffer
       // đang mang theo — để đoạn ngắn nối được với đoạn ngắn liền trước.
       var mau: [String] = []
@@ -586,6 +600,20 @@ enum CatDoan {
       // theo. Đo trên Harry Potter tập 4: lệch đúng từ đoạn thứ 756.
       if Double(buffer.dai) >= Double(dich) * 0.6 { chot() }
     }
+
+    for (chiSo, doanVanNay) in doanVan(van).enumerated() {
+      for (manh, q) in NhanVatLuat.manhCauThoai(doanVanNay) {
+        if q < 0 {
+          catManh(manh)
+          continue
+        }
+        chot()
+        cauHienTai = "\(chiSo):\(q)"
+        catManh(manh)
+        chot()
+        cauHienTai = ""
+      }
+    }
     chot()
     return ra
   }
@@ -604,6 +632,38 @@ enum CatDoan {
     let doc = ChuanHoa.deDoc(suaChuHoa(hien, bang), moSo: moSo)
     guard docDuoc(doc) else { return nil }
     return Doan(hien: hien, doc: doc, tieuDe: true)
+  }
+
+  /// Các đoạn văn của một chương, đúng như bộ cắt nhìn thấy chúng —
+  /// `doanVanCuaChuong` của bản Flutter (trừ bước bỏ tiêu đề lặp, bản Swift làm
+  /// ở `DonSach`).
+  ///
+  /// Dùng chung cho [cat] và việc phân tích nhân vật: nhãn người nói gắn theo
+  /// (chương, chỉ số đoạn văn), nên hai bên đếm lệch nhau dù một đoạn là mọi
+  /// nhãn phía sau lệch chỗ mà không có gì báo.
+  ///
+  /// `buildChunks` chuẩn hoá phần hiện (`normalizeForDisplay`) TRƯỚC khi cắt.
+  /// Bản 2.0.0a bỏ bước này, nên ký tự vô hình, NBSP và khoảng trắng đôi lọt
+  /// thẳng lên màn hình và vào engine.
+  ///
+  /// Đoạn mở đầu bằng chữ THƯỜNG được nối vào đoạn trước (từ 2.1.0 của bản
+  /// Flutter): bản scan hay ngắt cứng dòng giữa câu rồi bọc mỗi dòng vào một
+  /// `<p>`, câu dẫn bị chặt đôi (người nói ở nửa trên, dấu ":" ở nửa dưới) và
+  /// lời thoại dài bị cắt làm nhiều đoạn đọc bằng nhiều giọng. Luật này đổi cả
+  /// cách cắt sách THƯỜNG, nên phải có ở đây để còn khớp từng đoạn với Flutter.
+  static func doanVan(_ van: String) -> [String] {
+    var ra: [String] = []
+    for p in tachDoanVan(ChuanHoa.deHien(van)) {
+      let d = p.replacingOccurrences(of: "\n", with: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      if d.isEmpty { continue }
+      if !ra.isEmpty, d.unicodeScalars.first?.properties.generalCategory == .lowercaseLetter {
+        ra[ra.count - 1] += " " + d
+      } else {
+        ra.append(d)
+      }
+    }
+    return ra
   }
 
   /// Tách theo dòng trống — tương đương `split(RegExp(r'\n{2,}'))`.

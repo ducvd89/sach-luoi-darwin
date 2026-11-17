@@ -64,4 +64,24 @@ char *kiem_am_nhan(BoKiemAm *bo, const char *wav, float nhip);
 
 void kiem_am_dong(BoKiemAm *bo);
 
+// --- Laya: chọn người nói, đoán giới tính (native/vieneu/src/ffi_laya.rs) --
+//
+// Tiền tố `laya_` — cũng phải có trong danh sách giữ symbol của bản iOS. Mọi
+// chuỗi trả về giải phóng bằng vieneu_string_free. Một handle chỉ được gọi từ
+// MỘT luồng tại một thời điểm: laya_predict lấy `&mut` trên phiên ONNX mà
+// không khoá.
+
+typedef struct LayaHandle LayaHandle;
+
+// Mở từ thư mục có laya.onnx, tokenizer.json, rl_agent_config.json.
+LayaHandle *laya_open(const char *thu_muc, int threads, char **error_out);
+void laya_close(LayaHandle *handle);
+
+// thoai NULL = câu hỏi không có "quote" (đoán giới tính). lua_chon_json là
+// [{"nhan": "...", "mo_ta": "..."}, ...]. Trả {"xac_suat": [...], "chon": i}
+// hoặc NULL — khi ấy hỏi laya_last_error.
+char *laya_predict(LayaHandle *handle, const char *doan, const char *thoai,
+                   const char *huong_dan, const char *lua_chon_json);
+char *laya_last_error(const LayaHandle *handle);
+
 #endif

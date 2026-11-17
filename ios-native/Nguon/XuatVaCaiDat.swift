@@ -135,10 +135,12 @@ struct CaiDatView: View {
           @Bindable var tai = TaiMoHinh.chung
           // Bày CẢ BA gói, không chỉ v3: mỗi engine một mô hình riêng, và
           // người dùng chọn engine nào thì phải tải được gói của engine ấy.
-          ForEach(GoiMoHinh.tatCa) { goi in
+          ForEach(GoiMoHinh.tatCa.filter { $0.id != GoiMoHinh.laya.id }) { goi in
             DongGoi(goi: goi, tai: tai)
           }
-          if let l = tai.loi {
+          DongLaya()
+          // Lỗi tải Laya đã hiện ngay dưới dòng của nó (`DongLaya`).
+          if let l = tai.loi, !l.hasPrefix(GoiMoHinh.laya.ten) {
             Text(l).font(.caption).foregroundStyle(.red)
           }
           Text("Tải một lần, sau đó đọc hoàn toàn không cần mạng.")

@@ -20,6 +20,11 @@ struct GoiMoHinh: Identifiable, Hashable {
   /// ra được vài file, rồi engine chết khi nạp với một lỗi chẳng nói lên gì.
   var maBam: String? = nil
 
+  /// Thư mục con để bung gói vào, tính từ thư mục mô hình; nil là bung thẳng
+  /// vào thư mục mô hình. Gói Laya để ba file ở gốc ZIP, mà app tìm chúng ở
+  /// `laya/`.
+  var thuMucBung: String? = nil
+
   /// File tải thẳng, không qua ZIP. Bộ kiểm âm wav2vec2 đi đường này vì nó chỉ
   /// là hai file rời chứ không đóng gói.
   var tepRoi: [TepRoi] = []
@@ -98,7 +103,22 @@ struct GoiMoHinh: Identifiable, Hashable {
             luu: "kiem-am/\(banKiemAm)/phonemes.json"),
     ])
 
-  static let tatCa = [v3, v2, matcha, kiemAm]
+  /// Laya — nhận diện người nói cho đọc nhiều giọng: checkpoint luyện riêng
+  /// trên Harry Potter tập 4 và Lộc Đỉnh Ký (máy RTX 5080), ONNX float16. Đây
+  /// đúng là bản mà các số đo trong `laya.rs` và bài test Flutter lấy ra (xác
+  /// suất "Fred" 0,936). Đo bên Swift trên Harry Potter chương 5, 90 câu gán
+  /// tay: 78 đúng, 10 để người dẫn đọc (Laya không chắc), 2 sai giọng.
+  ///
+  /// Bung vào `laya/` — đúng chỗ `Laya.thuMuc` tìm, nên nút nhập tay từ thư
+  /// mục vẫn dùng chung chỗ ấy.
+  static let laya = GoiMoHinh(
+    id: "laya", ten: "Laya — nhận diện người nói", tep: "laya.zip", coMB: 572.1,
+    canCo: Laya.canCo.map { "laya/\($0)" },
+    moTa: "Đoán ai nói câu thoại nào và giới tính nhân vật, để đọc mỗi người một giọng.",
+    maBam: "0474df0ccf622cfc37d653886704560f5c601fdda3e9245d78dfaa7039d56176",
+    thuMucBung: "laya")
+
+  static let tatCa = [v3, v2, matcha, kiemAm, laya]
 }
 
 /// Tải gói mô hình về máy rồi bung ra.
@@ -279,11 +299,23 @@ final class TaiMoHinh {
 
     let dau = dich.appendingPathComponent(goi.dauBungXong)
     try? fm.removeItem(at: dau)
-    for ten in capTren {
-      let tu = nhap.appendingPathComponent(ten)
-      let toi = dich.appendingPathComponent(ten)
-      try? fm.removeItem(at: toi)
-      try fm.moveItem(at: tu, to: toi)
+    if let con = goi.thuMucBung {
+      // Gói có thư mục riêng (Laya): dời CẢ thư mục nháp vào chỗ, không dời
+      // từng file — dời hỏng giữa chừng thì không còn bộ mô hình nửa mới nửa
+      // cũ (laya.onnx mới với tokenizer cũ) mà `Laya.daCo` vẫn báo là có.
+      // Đóng handle NGAY TRƯỚC khi thay: đóng lúc bắt đầu tải thì một lượt
+      // phân tích đang chạy mở lại mô hình cũ và giữ nó suốt phần còn lại.
+      if con == "laya" { Laya.chung.dong() }
+      let noiBung = dich.appendingPathComponent(con)
+      try? fm.removeItem(at: noiBung)
+      try fm.moveItem(at: nhap, to: noiBung)
+    } else {
+      for ten in capTren {
+        let tu = nhap.appendingPathComponent(ten)
+        let toi = dich.appendingPathComponent(ten)
+        try? fm.removeItem(at: toi)
+        try fm.moveItem(at: tu, to: toi)
+      }
     }
     fm.createFile(atPath: dau.path, contents: Data(goi.maBam?.utf8 ?? "".utf8))
     guard goi.daCo else { throw LoiTai.thieuFile }

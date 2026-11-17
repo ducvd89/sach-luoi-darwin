@@ -10,7 +10,10 @@ struct Giong: Identifiable, Hashable {
   var id: String { ten }
   let ten: String
   let moTa: String
-  let nam: Bool
+  /// "nam", "nu", hoặc rỗng khi `giong.json` không khai (Latradio, Việt Sử —
+  /// giọng nhân bản). Bản trước giữ một cờ `nam` nên giọng không khai bị coi là
+  /// nữ, và tự chọn giọng sẽ gán chúng cho nhân vật nữ.
+  let gioi: String
 
   static let tatCa: [Giong] = doc()
 
@@ -24,7 +27,8 @@ struct Giong: Identifiable, Hashable {
     return presets.map { ten, v in
       Giong(ten: ten,
             moTa: v["description"] as? String ?? "",
-            nam: (v["gender"] as? String) == "male")
+            gioi: (v["gender"] as? String) == "male" ? "nam"
+              : (v["gender"] as? String) == "female" ? "nu" : "")
     }
     // Sắp theo tên cho ổn định: JSON là từ điển nên thứ tự không đảm bảo, mà
     // danh sách nhảy loạn mỗi lần mở app thì không ai tìm được giọng quen.
@@ -76,6 +80,41 @@ final class CaiDat {
       giongChon = luu
     } else {
       giongChon = Giong.tatCa.first?.ten ?? ""
+    }
+  }
+}
+
+extension Giong {
+  /// Giọng hợp giới tính [gioi] ("nam" | "nu"). Giọng không khai giới tính
+  /// không hợp bên nào.
+  func hop(gioi: String) -> Bool { !self.gioi.isEmpty && self.gioi == gioi }
+}
+
+extension NhanVatSach {
+  /// Tự chọn giọng cho nhân vật CHƯA có giọng: cùng giới, tránh giọng người
+  /// dẫn và giọng đã dùng cho người khác. Nhân vật người dùng đã đặt về giọng
+  /// người dẫn ([NhanVat.giongNguoiDan]) thì để yên.
+  ///
+  /// Khác bản Flutter ở chỗ hết giọng: bên ấy lấy giọng ĐẦU TIÊN cùng giới, nên
+  /// mọi nhân vật thừa dồn vào một giọng — có khi chính là giọng người dẫn. Ở
+  /// đây lấy giọng cùng giới ÍT người dùng nhất và không bao giờ là giọng người
+  /// dẫn (trừ khi đó là giọng cùng giới duy nhất). Giọng không khai giới tính
+  /// chỉ dùng khi không còn giọng cùng giới nào.
+  mutating func tuChonGiong(nguoiDan: String, giong: [Giong]) {
+    var soLan: [String: Int] = [:]
+    for n in nhanVat where !n.giong.isEmpty { soLan[n.giong, default: 0] += 1 }
+    for i in nhanVat.indices where nhanVat[i].giong.isEmpty {
+      var hop = giong.filter { $0.hop(gioi: nhanVat[i].gioi) }
+      if hop.isEmpty { hop = giong.filter { $0.gioi.isEmpty } }
+      let khongPhaiDan = hop.filter { $0.ten != nguoiDan }
+      if !khongPhaiDan.isEmpty { hop = khongPhaiDan }
+      // Ít dùng nhất; ngang nhau thì theo thứ tự danh sách cho ổn định.
+      guard let ung = hop.enumerated().min(by: { a, b in
+        let x = soLan[a.element.ten, default: 0], y = soLan[b.element.ten, default: 0]
+        return x != y ? x < y : a.offset < b.offset
+      })?.element else { continue }
+      soLan[ung.ten, default: 0] += 1
+      nhanVat[i].giong = ung.ten
     }
   }
 }

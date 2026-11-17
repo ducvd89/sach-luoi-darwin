@@ -18,6 +18,8 @@ void main(List<String> args) {
   // Phần ĐỌC cũng phải khớp, không chỉ phần hiện: nó mới là thứ engine nhận.
   File('${args[1]}.am').writeAsStringSync(
       kq.chunks.map((c) => c.speech).join('\n---\n'));
+  // Chỉ số lời nói của từng đoạn ("đoạn văn:câu thoại") — khoá để tra người nói lúc phát.
+  File('${args[1]}.cau').writeAsStringSync(kq.chunks.map((c) => c.cau).join('\n'));
   final dai = doan.map((d) => d.length).toList();
   print('dart:  ${doan.length} doan | moSo $moSo | dai nhat ${dai.reduce((a, b) => a > b ? a : b)}');
 }

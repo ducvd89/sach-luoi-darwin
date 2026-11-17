@@ -87,7 +87,10 @@ struct NgheView: View {
     }
     // Đổi sách thì bỏ chương của cuốn cũ.
     .onChange(of: kho.dangMoId) { _, _ in
-      chuongChon = beNgang == .regular ? chuongNgheDo : nil
+      // MO_CHUONG=1 (biến môi trường, như TAB và NHAP) mở sẵn chương đang nghe
+      // cả trên màn hẹp — để chụp được thanh phát trên máy ảo mà không cần chạm.
+      let moSan = ProcessInfo.processInfo.environment["MO_CHUONG"] != nil
+      chuongChon = beNgang == .regular || moSan ? chuongNgheDo : nil
     }
     // Trình phát tự sang chương kế: khung đọc đi theo.
     .onChange(of: phat.chuongDangId) { _, moi in
@@ -178,12 +181,34 @@ struct ThanhPhat: View {
   let doanDang: Int
   let tong: TimeInterval
   private var phat: TrinhPhat { .chung }
+  @State private var moNhanVat = false
 
   var body: some View {
     @Bindable var cd = CaiDat.chung
     VStack(spacing: 8) {
       // Lỗi phải HIỆN RA: bản trước ghi vào `loi` mà không chỗ nào đọc, nên
       // chưa tải mô hình thì bấm phát chỉ thấy nút bật rồi tắt.
+      // Việc chạy lâu của đọc nhiều giọng (cắt lại một lần cho sách cũ) phải NÓI
+      // ra đang làm gì: chỉ có vòng quay trên nút thì trông như treo — cắt lại
+      // Lộc Đỉnh Ký trên iPhone mất cỡ nửa phút.
+      if KhoNhanVat.chung.dangChay, !KhoNhanVat.chung.dangPhanTich, let viec = KhoNhanVat.chung.viecDang {
+        HStack(spacing: 8) {
+          ProgressView().controlSize(.small)
+          Text(viec).font(.caption).foregroundStyle(.secondary)
+          Spacer()
+        }
+      }
+      if let loi = KhoNhanVat.chung.loiCatLai {
+        HStack(alignment: .top) {
+          Label(loi, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.red)
+          Spacer()
+          Button("Đóng", systemImage: "xmark") { KhoNhanVat.chung.loiCatLai = nil }
+            .labelStyle(.iconOnly)
+            .font(.caption)
+        }
+      }
       if let loi = phat.loi {
         HStack(alignment: .top) {
           Label(loi, systemImage: "exclamationmark.triangle.fill")
@@ -210,70 +235,28 @@ struct ThanhPhat: View {
       .font(.caption2)
       .foregroundStyle(.secondary)
 
-      HStack(spacing: 22) {
-        // Tốc độ: thanh trượt nhỏ ở đúng chỗ nút chọn tốc độ cũ, 0,70–2,00×,
-        // bước 0,05. Áp lúc phát (đổi nhịp giữ cao độ) nên kéo tới đâu nghe
-        // thấy ngay tới đó, không đọc lại gì.
-        HStack(spacing: 6) {
-          // Làm tròn bước 0,05 trong binding chứ không dùng `step:` — trên Mac
-          // `step` vẽ 27 vạch chấm dưới một thanh chỉ rộng 96 điểm.
-          Slider(value: Binding(get: { cd.tocDo },
-                                set: { cd.tocDo = ($0 * 20).rounded() / 20 }),
-                 in: CaiDat.khoangTocDo)
-            .controlSize(.small)
-            .frame(width: 96)
-            .accessibilityLabel("Tốc độ đọc")
-            .accessibilityValue(Self.tocDoChu(cd.tocDo))
-          Text(Self.tocDoChu(cd.tocDo))
-            .font(.caption.weight(.medium))
-            .monospacedDigit()
-            .fixedSize()
+      // Một hàng khi đủ chỗ; hẹp thì hai hàng: tua và phát ở trên, tốc độ,
+      // "Nhiều giọng" và menu ở dưới. Một hàng cần ~440 điểm; mặt ngoài iPhone
+      // Duo trừ thanh tab dọc chỉ còn ~350, và bản trước tràn ra — cả ngăn đọc
+      // bị đẩy lệch trái, chữ cụt hai bên, nút menu khuất sau thanh tab.
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 22) {
+          tocDo
+          Spacer()
+          dieuKhien
+          Spacer()
+          NutNhieuGiong(moTrang: $moNhanVat)
+          menuThem
         }
-
-        Spacer()
-
-        Button("Đoạn trước", systemImage: "backward.end.fill") {
-          phat.nhay(phat.doanDang - 1)
-        }
-        .labelStyle(.iconOnly)
-        .buttonBorderShape(.circle)
-        Button(phat.dangPhat ? "Tạm dừng" : "Phát",
-               systemImage: phat.dangPhat ? "pause.fill" : "play.fill") {
-          if phat.dangPhat { phat.tamDung() } else { phat.phat() }
-        }
-        .labelStyle(.iconOnly)
-        .font(.title2)
-        .buttonStyle(.glassProminent)
-        .buttonBorderShape(.circle)
-        Button("Đoạn sau", systemImage: "forward.end.fill") {
-          phat.nhay(phat.doanDang + 1)
-        }
-        .labelStyle(.iconOnly)
-        .buttonBorderShape(.circle)
-
-        Spacer()
-
-        Menu("Thêm", systemImage: "ellipsis") {
-          Picker(selection: Binding(get: { phat.henGio }, set: { phat.datHenGio($0) })) {
-            Text("Tắt").tag(TrinhPhat.HenGio.tat)
-            ForEach([15, 30, 45, 60, 90], id: \.self) { p in
-              Text("\(p) phút").tag(TrinhPhat.HenGio.phut(p))
-            }
-            Text("Hết chương này").tag(TrinhPhat.HenGio.cuoiChuong)
-          } label: {
-            Label("Hẹn giờ tắt", systemImage: "moon.zzz")
-          }
-          .pickerStyle(.menu)
-
-          Toggle(isOn: $cd.kiemAm) {
-            Label("Kiểm âm trước khi phát", systemImage: "checkmark.circle")
+        VStack(spacing: 10) {
+          HStack(spacing: 26) { dieuKhien }
+          HStack(spacing: 14) {
+            tocDo
+            Spacer(minLength: 0)
+            NutNhieuGiong(moTrang: $moNhanVat)
+            menuThem
           }
         }
-        .labelStyle(.iconOnly)
-        .menuIndicator(.hidden)
-        .buttonBorderShape(.circle)
-        // Menu dựng lại nhãn theo `labelStyle` của chính nó, nên các mục bên
-        // trong vẫn có chữ.
       }
       .font(.title3)
     }
@@ -282,11 +265,165 @@ struct ThanhPhat: View {
     // Nền kính của hệ thống, không tự pha màu: nó tự lo tương phản và tự nhạt
     // đi khi người dùng bật giảm trong suốt.
     .background(.bar)
+    .sheet(isPresented: $moNhanVat) {
+      if let id = phat.sachId { NhanVatView(sachId: id) }
+    }
+  }
+
+  @ViewBuilder private var tocDo: some View {
+    @Bindable var cd = CaiDat.chung
+    // Tốc độ: thanh trượt nhỏ ở đúng chỗ nút chọn tốc độ cũ, 0,70–2,00×,
+    // bước 0,05. Áp lúc phát (đổi nhịp giữ cao độ) nên kéo tới đâu nghe
+    // thấy ngay tới đó, không đọc lại gì.
+    HStack(spacing: 6) {
+      // Làm tròn bước 0,05 trong binding chứ không dùng `step:` — trên Mac
+      // `step` vẽ 27 vạch chấm dưới một thanh chỉ rộng 96 điểm.
+      Slider(value: Binding(get: { cd.tocDo },
+                            set: { cd.tocDo = ($0 * 20).rounded() / 20 }),
+             in: CaiDat.khoangTocDo)
+        .controlSize(.small)
+        .frame(width: 96)
+        .accessibilityLabel("Tốc độ đọc")
+        .accessibilityValue(Self.tocDoChu(cd.tocDo))
+      Text(Self.tocDoChu(cd.tocDo))
+        .font(.caption.weight(.medium))
+        .monospacedDigit()
+        .fixedSize()
+    }
+  }
+
+  @ViewBuilder private var dieuKhien: some View {
+    Button("Đoạn trước", systemImage: "backward.end.fill") {
+      phat.nhay(phat.doanDang - 1)
+    }
+    .labelStyle(.iconOnly)
+    .buttonBorderShape(.circle)
+    Button(phat.dangPhat ? "Tạm dừng" : "Phát",
+           systemImage: phat.dangPhat ? "pause.fill" : "play.fill") {
+      if phat.dangPhat { phat.tamDung() } else { phat.phat() }
+    }
+    .labelStyle(.iconOnly)
+    .font(.title2)
+    .buttonStyle(.glassProminent)
+    .buttonBorderShape(.circle)
+    Button("Đoạn sau", systemImage: "forward.end.fill") {
+      phat.nhay(phat.doanDang + 1)
+    }
+    .labelStyle(.iconOnly)
+    .buttonBorderShape(.circle)
+  }
+
+  private var menuThem: some View {
+    @Bindable var cd = CaiDat.chung
+    return Menu("Thêm", systemImage: "ellipsis") {
+      Picker(selection: Binding(get: { phat.henGio }, set: { phat.datHenGio($0) })) {
+        Text("Tắt").tag(TrinhPhat.HenGio.tat)
+        ForEach([15, 30, 45, 60, 90], id: \.self) { p in
+          Text("\(p) phút").tag(TrinhPhat.HenGio.phut(p))
+        }
+        Text("Hết chương này").tag(TrinhPhat.HenGio.cuoiChuong)
+      } label: {
+        Label("Hẹn giờ tắt", systemImage: "moon.zzz")
+      }
+      .pickerStyle(.menu)
+
+      Toggle(isOn: $cd.kiemAm) {
+        Label("Kiểm âm trước khi phát", systemImage: "checkmark.circle")
+      }
+
+      Button {
+        moNhanVat = true
+      } label: {
+        Label(nhieuGiong ? "Nhân vật · đang đọc nhiều giọng" : "Nhân vật và giọng đọc…",
+              systemImage: nhieuGiong ? "person.2.fill" : "person.2")
+      }
+      .disabled(phat.sachId == nil)
+    }
+    .labelStyle(.iconOnly)
+    .menuIndicator(.hidden)
+    .buttonBorderShape(.circle)
+    // Menu dựng lại nhãn theo `labelStyle` của chính nó, nên các mục bên
+    // trong vẫn có chữ.
+  }
+
+  private var nhieuGiong: Bool {
+    phat.sachId.flatMap { KhoNhanVat.chung.cua($0)?.bat } ?? false
   }
 
   /// "1,25×" — dấu phẩy thập phân như mọi con số khác trong app.
   static func tocDoChu(_ v: Double) -> String {
     String(format: "%.2f×", v).replacingOccurrences(of: ".", with: ",")
+  }
+}
+
+/// Nút "Nhiều giọng" ngay trên thanh phát — không giấu trong menu.
+///
+/// Bấm một cái là bật/tắt, đúng như người dùng chờ ở một công tắc. Sách chưa
+/// có nhân vật nào (chưa phân tích, chưa có Laya) thì bật cũng không có gì để
+/// đọc, nên khi ấy nút mở trang Nhân vật thay vì bật suông. Bật/tắt tức thì —
+/// sách không cắt lại; riêng sách nhập trước luật tách lời nói thì lần bật đầu
+/// cắt lại một lần, nút hiện vòng quay trong lúc ấy.
+///
+/// Có chữ khi đủ chỗ (Mac, iPad, iPhone nằm ngang), chỉ còn biểu tượng khi
+/// hẹp — `ViewThatFits` tự chọn, không phải đoán theo khổ máy.
+struct NutNhieuGiong: View {
+  @Binding var moTrang: Bool
+  @Environment(KhoSach.self) private var kho
+  private var kv: KhoNhanVat { .chung }
+  private var phat: TrinhPhat { .chung }
+
+  var body: some View {
+    let id = phat.sachId
+    let nv = id.flatMap { kv.cua($0) }
+    let bat = nv?.bat ?? false
+    let coNhanVat = !(nv?.nhanVat.isEmpty ?? true)
+    let dangCat = kv.dangChay && !kv.dangPhanTich
+
+    ViewThatFits(in: .horizontal) {
+      nut(bat: bat, dangCat: dangCat, chu: true, coNhanVat: coNhanVat)
+      nut(bat: bat, dangCat: dangCat, chu: false, coNhanVat: coNhanVat)
+    }
+    .disabled(id == nil || kv.dangChay)
+  }
+
+  @ViewBuilder
+  private func nut(bat: Bool, dangCat: Bool, chu: Bool, coNhanVat: Bool) -> some View {
+    let nhan = bat ? "Nhiều giọng: bật" : "Nhiều giọng: tắt"
+    let hinh = bat ? "person.2.fill" : "person.2"
+    let b = Button {
+      bam(coNhanVat: coNhanVat, bat: bat)
+    } label: {
+      if dangCat {
+        ProgressView().controlSize(.small)
+      } else if chu {
+        // Luôn ghi "Nhiều giọng": trạng thái nằm ở MÀU (đặc là bật), chữ "Một
+        // giọng" lúc tắt đọc như tên một chế độ chứ không như công tắc.
+        Label("Nhiều giọng", systemImage: hinh)
+          .font(.callout.weight(.medium))
+          .fixedSize()
+      } else {
+        Label(nhan, systemImage: hinh).labelStyle(.iconOnly)
+      }
+    }
+    .accessibilityLabel(nhan)
+    .help(coNhanVat ? (bat ? "Tắt đọc nhiều giọng" : "Đọc mỗi nhân vật một giọng")
+                    : "Phân tích nhân vật để đọc nhiều giọng")
+    // Đang bật thì nút ĐẶC (màu chính của app), tắt thì nút kính thường — nhìn
+    // là biết trạng thái, như nút phát.
+    if bat {
+      b.buttonStyle(.glassProminent).tint(Sac.chinh).buttonBorderShape(chu ? .capsule : .circle)
+    } else {
+      b.buttonStyle(.glass).buttonBorderShape(chu ? .capsule : .circle)
+    }
+  }
+
+  private func bam(coNhanVat: Bool, bat: Bool) {
+    guard let id = phat.sachId, let s = kho.sach.first(where: { $0.id == id }) else { return }
+    if coNhanVat {
+      kv.batNhieuGiong(!bat, sach: s, kho: kho)
+    } else {
+      moTrang = true
+    }
   }
 }
 

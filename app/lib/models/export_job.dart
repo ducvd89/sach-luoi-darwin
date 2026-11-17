@@ -4,6 +4,8 @@
 /// dụng rồi mở lại chạy tiếp mà không mất công đã làm.
 library;
 
+import '../core/nhan_vat.dart';
+import 'book.dart';
 import 'settings.dart';
 
 enum JobStatus {
@@ -200,6 +202,8 @@ class ExportJob {
     required this.outputDir,
     this.treeUri = '',
     this.nguCanh = NguCanh.loLon,
+    this.giongNhanVat = const {},
+    this.nguoiNoi = const {},
     this.status = JobStatus.queued,
     int? cursor,
     this.doneChunks = 0,
@@ -224,6 +228,22 @@ class ExportJob {
   final String engineId;
   final String voiceId;
   final String voiceName;
+
+  /// Tên nhân vật -> mã giọng, chụp LÚC TẠO job. Chụp chứ không đọc lại lúc chạy: job dừng rồi
+  /// chạy tiếp sau khi tắt app, mà người dùng có thể đã đổi giọng nhân vật trong lúc ấy — phần đã
+  /// xuất và phần chạy tiếp phải cùng một bảng phân vai. Rỗng là đọc cả sách bằng [voiceId].
+  final Map<String, String> giongNhanVat;
+
+  /// Nhãn người nói ("chương:đoạn văn:câu" -> tên) chụp cùng lúc với [giongNhanVat], cùng lý do.
+  final Map<String, String> nguoiNoi;
+
+  /// Giọng đọc đoạn [chunk]: giọng của nhân vật nói đoạn ấy nếu job có chọn, không thì [voiceId].
+  String giongCho(Chunk chunk) {
+    final ten = nguoiNoiCuaDoan(nguoiNoi, chunk);
+    if (ten.isEmpty) return voiceId;
+    final g = giongNhanVat[ten] ?? '';
+    return g.isEmpty ? voiceId : g;
+  }
   final double speed;
 
   /// Khoảng nghỉ chèn giữa các đoạn, ghi lại theo job để chạy tiếp giữ đúng nhịp
@@ -314,6 +334,8 @@ class ExportJob {
         'engineId': engineId,
         'voiceId': voiceId,
         'voiceName': voiceName,
+        if (giongNhanVat.isNotEmpty) 'giongNhanVat': giongNhanVat,
+        if (nguoiNoi.isNotEmpty) 'nguoiNoi': nguoiNoi,
         'speed': speed,
         'pauseMs': pauseMs,
         'formatId': formatId,
@@ -347,6 +369,12 @@ class ExportJob {
         engineId: migrateEngineId(json['engineId'] as String? ?? 'vieneu'),
         voiceId: json['voiceId'] as String,
         voiceName: json['voiceName'] as String? ?? '',
+        nguoiNoi: {
+          for (final e in (json['nguoiNoi'] as Map? ?? const {}).entries) e.key as String: e.value as String,
+        },
+        giongNhanVat: {
+          for (final e in (json['giongNhanVat'] as Map? ?? const {}).entries) e.key as String: e.value as String,
+        },
         speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
         // Job tạo trước khi có khoảng nghỉ thì giữ nguyên cách ghép cũ, nếu
         // không phần chạy tiếp sẽ lệch nhịp so với phần đã xuất.

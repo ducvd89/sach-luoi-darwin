@@ -86,6 +86,14 @@ cd native/vieneu && cargo build --release
 powershell -ExecutionPolicy Bypass -File dong-goi.ps1
 ```
 
+Đóng gói Linux, AppImage & Flatpak (dựng thư viện Rust, build Linux release, AppImage và Flatpak):
+
+```bash
+./dong-goi-linux.sh
+./build-appimage.sh
+./flatpak/build-flatpak.sh
+```
+
 APK arm64 — cần Android SDK + NDK, và phải build .so trước rồi chép vào `jniLibs/`.
 
 **Build Rust cho Android phải dùng `cmake` của Android SDK**, không phải bản đi kèm Visual
@@ -978,6 +986,80 @@ Hai cạm bẫy, cả hai đều hỏng lặng lẽ:
 - **Bản Mac không có hộp cát**, nên `Documents` và `Application Support` là của cả người
   dùng. `ThuMuc` dồn mọi thứ vào `~/Library/Application Support/<mã gói>/`; iOS giữ chỗ cũ.
 
+### Đọc nhiều giọng (Laya) trên bản Swift
+
+Bản Swift của tính năng 2.1.0 bên Flutter: `NhanVat.swift` ← `core/nhan_vat.dart`,
+`Laya.swift` ← `laya_native.dart` (cổng `laya_*`), `KhoNhanVat.swift` ← phần nhân vật của
+`app_state.dart`, `NhanVatView.swift` ← `nhan_vat_page.dart`. Mở từ menu "Thêm" của thanh phát.
+
+**Mô hình Laya tải từ kho mô hình** như các engine: `laya.zip` (572 MB) ở release v1 của
+`sach-luoi-models`, ba file ở GỐC zip nên gói khai `thuMucBung: "laya"` để bung vào `mohinh/laya/`.
+Đây là checkpoint luyện trên RTX 5080 — đúng bản mà số đo trong `laya.rs` và
+`laya_native_test.dart` lấy ra (xác suất "Fred" 0,936 khớp từng số). Đo bên Swift + Rust trên
+Harry Potter chương 5 (90 câu gán tay, `vang.py` ở nhánh `thu-nghiem-laya`): 78 đúng, 10 để người
+dẫn đọc vì Laya không chắc, 2 sai giọng; 51 giây cho cả chương trên Mac M-series.
+
+Vẫn còn nút "Nhập từ thư mục…" cho bản luyện riêng chưa lên kho. Xuất checkpoint PyTorch ra ONNX
+bằng `thu-nghiem/laya/xuat_onnx.py` (gói `laya` không có lệnh xuất). Ba cái bẫy đã dẫm:
+
+- Phải tắt fastpath của `nn.TransformerEncoderLayer` (`torch.backends.mha.set_fastpath_enabled`):
+  eval + no_grad gom cả lớp vào `_transformer_encoder_layer_fwd`, ONNX không có phép ấy.
+- Chuyển float16 bằng `onnxruntime.transformers.onnx_model.OnnxModel`, KHÔNG bằng
+  `onnxconverter_common`: bản ấy để lại Cast(to=float32) có đầu ra float16 (hoặc Mul trộn hai kiểu)
+  và ONNX Runtime từ chối nạp.
+- Đối chiếu logits với PyTorch ngay sau khi xuất (script tự làm): ck3 lệch tối đa 0,0038.
+
+**Câu thoại là từng LỜI NÓI trong ngoặc, không phải cả đoạn văn** (cả hai bản, `cacCauThoai` +
+`laLoiNoi` bên Dart, `NhanVatLuat` bên Swift). Bản 2.1.0 chỉ nhận đoạn văn MỞ ĐẦU bằng ngoặc là
+thoại và gán cả đoạn cho một người — sách viết thoại lẫn trong đoạn kể thì không còn gì: Lộc Đỉnh
+Ký hồi 1 có 246 câu trong ngoặc ở 107 đoạn văn mà chỉ 2 đoạn mở đầu bằng ngoặc, cả cuốn ra 4 ứng
+viên. Giờ ra 27 (Vi Tiểu Bảo, Khang Hy, Song Nhi, Trần Cận Nam…).
+
+- Câu trong ngoặc tính là LỜI NÓI khi đứng đầu đoạn văn, ngay sau dấu hai chấm, hoặc tự kết bằng
+  dấu câu — để tiếng động (“bình” một tiếng), tên chiêu, tên sách ở lại lời dẫn. Đo trên 1.042
+  câu trong ngoặc của Lộc Đỉnh Ký hồi 8, 10, 11 (nhãn Opus): giữ 939/960 lời nói, bỏ 38/82 câu
+  không phải lời nói.
+- Đoạn văn mở đầu bằng thoại (kiểu Harry Potter) hỏi Laya MỘT lần cả đoạn như 2.1.0 rồi gán cho
+  mọi lời nói trong đoạn; lời nói trong đoạn kể hỏi từng câu, đoạn trích 450 ký tự trước – 200 sau
+  trên chữ cả chương — đúng cách dựng dữ liệu luyện Lộc Đỉnh Ký (`gop.py`).
+- Ứng viên lấy thêm từ mệnh đề dẫn ngay trước ngoặc ("…sơ hở. Vi Tiểu Bảo nói: “").
+- Nhãn khoá "chương:đoạn văn:câu"; khoá hai phần của 2.1.0 vẫn đọc được (áp cho cả đoạn văn).
+
+**Sách cắt theo lời nói NGAY TỪ LÚC NHẬP, bật/tắt nhiều giọng không cắt lại.** Mỗi lời nói là một
+đoạn riêng mang chỉ số "đoạn văn:câu" (`Chunk.cau` / `Doan.cau`); người nói tra LÚC PHÁT từ nhãn
+(`nguoiNoiCuaDoan`). Tắt nhiều giọng thì mọi đoạn đọc bằng giọng người dẫn. Bản 2.1.0 cắt lại cả
+cuốn mỗi lần bật/tắt hay phân tích thêm chương — số thứ tự đoạn đổi theo, cache, chỗ đang nghe và
+việc xuất file dở đều lệch. Sách nhập trước luật này (`Book.catThoai` / `Sach.catThoai` chưa bật)
+cắt lại MỘT lần ở lần bật đầu. Việc xuất file chụp cả bảng nhãn (`ExportJob.nguoiNoi`).
+
+Hệ quả cho cách cắt: sách CÓ thoại giờ nhiều đoạn hơn (Harry Potter 6.150 → 10.961, Lộc Đỉnh Ký
+22.305 → 44.494) và cache âm của những sách ấy tính lại khi cắt lại. Sách không có lời nói nào cắt
+y như trước từng ký tự. Hai bản khớp từng đoạn kể cả cột chỉ số lời nói —
+`ios-native/tool/soi-cat-doan.sh` so ba cột (hiện, đọc, chỉ số lời nói); đo trên Harry Potter,
+Lộc Đỉnh Ký, Đạo (131.242 đoạn), Phàm Nhân Tu Tiên (163.640 đoạn): khớp hết.
+
+Hai điều khác vẫn phải giữ:
+
+- **Đoạn văn của việc phân tích và của bộ cắt phải là MỘT danh sách** — `CatDoan.doanVan` /
+  `doanVanCuaChuong`, và câu thoại trong đoạn văn là MỘT danh sách — `cacCauThoai`. Lệch là mọi
+  nhãn phía sau gán nhầm người mà không có gì báo. Chỉ số chương thô bên Swift là `Chuong.goc`
+  (trước khi `DonSach` bỏ mục lục), không phải `Chuong.so`.
+- **Sách phải giữ file gốc** (`thuvien/<id>.nguon.<đuôi>`, `Sach.nguon`) — phân tích đọc lại văn bản
+  thô. Sách nhập trước bản này không có, trang Nhân vật cho "Chọn file gốc…" (từ chối file khác
+  cuốn bằng cách so tên chương).
+
+Bản Flutter 2.1.0 nối mọi đoạn văn mở đầu bằng chữ THƯỜNG vào đoạn trước (bản scan ngắt dòng
+giữa câu), cho MỌI sách — nên `CatDoan.doanVan` có luật ấy, không thì hết khớp.
+
+Ba chỗ bản Swift cố ý khác Flutter (đều ở phần chọn giọng, không đụng cách cắt): hết giọng cùng
+giới thì lấy giọng ÍT người dùng nhất và tránh giọng người dẫn (Flutter lấy giọng đầu tiên, dồn mọi
+nhân vật thừa vào một giọng); giọng không khai giới tính (Latradio, Việt Sử) không bị coi là nữ;
+"Giọng người dẫn" chọn tay được lưu riêng (`NhanVat.giongNguoiDan`) để lần phân tích sau không tự
+gán đè.
+
+Trình phát: đọc nhiều giọng thì đoạn rất ngắn, nên hàng xếp sẵn dài thêm tới khi phần chờ phát
+đủ 250 chữ (trần 8 đoạn) — đoạn thường ~256 chữ nên sách một giọng vẫn xếp đúng hai đoạn như cũ.
+
 ### Còn dở
 
 Chọn engine trong Cài đặt mới đổi chữ, chưa đổi engine thật (luôn dùng v3). Xuất file chưa
@@ -1068,6 +1150,16 @@ mới. Kiểm bằng mắt:
 ```bash
 cd /tmp && ar x native/vendor/xcframeworks/sachnoi_vieneu.xcframework/ios-arm64/libsachnoi_vieneu.a ggml.c.o && vtool -show-build ggml.c.o
 ```
+
+**Trình liên kết của Xcode 27.1 làm hỏng `.dylib` lớn.** ld-27106 ghi bảng ký hiệu gián tiếp
+(4 byte mỗi mục) ngay trước bảng chuỗi mà không đệm, nên số mục lẻ là bảng chuỗi lệch mốc 8 và
+dyld của macOS 27.2 từ chối nạp: `mis-aligned LINKEDIT string pool`. Dựng 2.1.0 ra
+`libsachnoi_vieneu.dylib` 665 mục — bản Flutter cho macOS chết ngay lần nạp đầu, và mọi bài test
+cần thư viện bị bỏ qua hay hỏng. Thư viện nhỏ thì tuỳ lần dựng, có lúc dính lúc không. `-ld_classic`
+đã bị bỏ nên `dung-native-apple.sh` sửa SAU khi liên kết bằng `native/tool/can_linkedit.py`: dời
+bảng chuỗi vào chỗ trống trước chữ ký mã rồi ký lại. Bản Swift không dính vì liên kết `.a` tĩnh.
+Script sửa cả bản trong `target/.../release/deps/`: cargo chép `deps/` đè lên `release/` ở mọi lần
+dựng, nên chạy `cargo build` trần (không qua script) là lại nhận bản hỏng — chạy lại script.
 
 **`libonnxruntime.dylib` trong `native/vendor/` phải có chữ ký hợp lệ.** File ấy từng nằm
 trong repo với chữ ký hỏng (`codesign --verify` báo "code or signature have been modified"),

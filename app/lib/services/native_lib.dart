@@ -24,6 +24,12 @@ DynamicLibrary openNativeLibrary(String fileName, {String? overridePath}) {
   if (Platform.isMacOS) {
     return DynamicLibrary.open('${_macosFrameworksDir()}/$fileName');
   }
+  if (Platform.isLinux) {
+    // Bản đóng gói Linux (Flatpak/AppImage) để thư viện ở `lib/` cạnh file thực thi, mà
+    // `dlopen` theo tên trần không tìm ở đó.
+    final goi = '${File(Platform.resolvedExecutable).parent.path}/lib/$fileName';
+    if (File(goi).existsSync()) return DynamicLibrary.open(goi);
+  }
   return DynamicLibrary.open(fileName);
 }
 

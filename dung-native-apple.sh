@@ -146,6 +146,17 @@ case "$viec" in
     xoa_cache_llama aarch64-apple-darwin
     (cd "$goc/native/sea-g2p" && cargo build --release --no-default-features --features ffi --target aarch64-apple-darwin)
     (cd "$goc/native/vieneu" && cargo build --release --target aarch64-apple-darwin)
+    # ld của Xcode 27.1 để bảng chuỗi lệch mốc 8 khi số ký hiệu gián tiếp lẻ, và dyld
+    # của macOS 27.2 từ chối nạp — xem đầu native/tool/can_linkedit.py.
+    # Sửa cả bản trong deps/: cargo chép deps/lib*.dylib đè lên release/ ở MỌI lần
+    # dựng, kể cả lần chẳng có gì đổi — sửa mỗi release/ thì một lệnh `cargo build`
+    # trần sau đó lặng lẽ trả lại bản hỏng.
+    for lib in "$goc/native/vieneu/target/aarch64-apple-darwin/release/libsachnoi_vieneu.dylib" \
+               "$goc/native/vieneu/target/aarch64-apple-darwin/release/deps/libsachnoi_vieneu.dylib" \
+               "$goc/native/sea-g2p/target/aarch64-apple-darwin/release/libsea_g2p_rs.dylib" \
+               "$goc/native/sea-g2p/target/aarch64-apple-darwin/release/deps/libsea_g2p_rs.dylib"; do
+      python3 "$goc/native/tool/can_linkedit.py" "$lib"
+    done
     ;;
 esac
 

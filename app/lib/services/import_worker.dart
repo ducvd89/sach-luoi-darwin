@@ -202,3 +202,31 @@ void _parseEntry(_Request request) {
     request.port.send(_Failure(err is FormatException ? err.message : '$err'));
   }
 }
+
+/// Các đoạn văn của từng chương, đúng như bộ cắt đoạn nhìn thấy (cùng cách tách chương, cùng bước
+/// dọn quảng cáo, cùng `doanVanCuaChuong`). Phân tích nhân vật gắn nhãn theo (chương, đoạn văn) nên
+/// chỉ cần lệch MỘT chương hay MỘT đoạn so với `buildChunks` là mọi nhãn phía sau lệch chỗ.
+Future<DoanVanSach> doanVanSachTrongNen({
+  required Uint8List bytes,
+  required String fileName,
+  bool removeBoilerplate = true,
+}) {
+  return Isolate.run(() {
+    final extension = p.extension(fileName).toLowerCase();
+    final baseName = p.basenameWithoutExtension(fileName);
+    final isZip = bytes.length > 2 && bytes[0] == 0x50 && bytes[1] == 0x4B;
+    final isEpub = extension == '.epub' || (isZip && extension != '.txt');
+    final parsed = isEpub ? parseEpub(bytes) : parseTxt(decodeTextFile(bytes), baseName);
+    final chapters = removeBoilerplate ? stripBoilerplate(parsed.chapters).chapters : parsed.chapters;
+    return (
+      doanVan: [for (final c in chapters) doanVanCuaChuong(c)],
+      tieuDe: [for (final c in chapters) c.title],
+    );
+  });
+}
+
+/// Đoạn văn từng chương cùng tiêu đề gốc của chương ấy. Tiêu đề để đối chiếu với `Chapter.title`
+/// của sách đang mở: số thứ tự chương của đoạn đang nghe (`Chunk.chapter`) phụ thuộc cài đặt dọn
+/// quảng cáo lúc sách được cắt lần cuối, còn số thứ tự của đoạn văn phụ thuộc cài đặt lúc phân
+/// tích — hai cái lệch nhau thì phải biết ngay thay vì phân tích nhầm chương.
+typedef DoanVanSach = ({List<List<String>> doanVan, List<String> tieuDe});
